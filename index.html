@@ -7,17 +7,30 @@
     <style>
         body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
         .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
-        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-        .note { font-size: 0.85em; color: #666; margin-top: 5px; display: block; }
-        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; width: 100%; transition: 0.2s; font-weight: bold; }
-        button:hover { background: #0056b3; }
-        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
-        #dlLink:hover { background: #218838; }
-        #resultMsg { margin-top: 15px; font-size: 0.9em; text-align: center; color: #d32f2f; font-weight: bold; line-height: 1.5; }
-        .debug-info { font-size: 0.8em; color: #666; margin-top: 10px; text-align: left; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        .note { font-size: 0.8em; color: #666; margin-top: 5px; display: block; }
+        
+        /* 範囲指定ボックスのスタイル */
+        .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; }
+        .btn-add { background: #17a2b8; margin-bottom: 20px; }
+        .btn-add:hover { background: #138496; }
+        .btn-remove { background: #dc3545; padding: 8px 15px; margin-top: 5px; font-size: 0.9em; width: auto; float: right; }
+        .btn-remove:hover { background: #c82333; }
+        .btn-process { background: #28a745; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
+        .btn-process:hover { background: #218838; }
+        
+        /* 回り込み解除 */
+        .clearfix::after { content: ""; clear: both; display: table; }
+
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
+        #dlLink:hover { background: #0056b3; }
+        #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
     </style>
 </head>
 <body>
@@ -25,43 +38,89 @@
 <div class="container">
     <h1>スライド結合ツール</h1>
     
-    <div class="form-group">
-        <label>1. .mcファイルを選択</label>
+    <div class="form-group" style="margin-bottom: 25px;">
+        <label>📁 対象の .mcファイルを選択</label>
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
-    <div class="form-group">
-        <label>2. 結合の始点Beat</label>
-        <input type="text" id="startBeat" placeholder="例: 23, 216, 288 または[23,216,288]">
-        <span class="note">対象となる最初のスライドのbeatを入力してください。（カッコやスペースが含まれていてもOKです）</span>
+    <!-- ここに範囲指定のボックスが追加されていく -->
+    <div id="rangesContainer">
+        <div class="range-group clearfix" id="range-0">
+            <h4>範囲 1</h4>
+            <div class="form-group">
+                <label>始点Beat</label>
+                <input type="text" class="startBeat" placeholder="例: 1, 0, 0">
+            </div>
+            <div class="form-group">
+                <label>終点Beat</label>
+                <input type="text" class="endBeat" placeholder="例: 3, 1, 2">
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
+        </div>
     </div>
 
-    <div class="form-group">
-        <label>3. 結合の終点Beat</label>
-        <input type="text" id="endBeat" placeholder="例: 25, 72, 288">
-        <span class="note">対象となる最後のスライドのbeatを入力してください。</span>
-    </div>
-
-    <button onclick="processMC()">スライドを結合する</button>
+    <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    <button type="button" class="btn-process" onclick="processMC()">🚀 一括で結合処理を実行</button>
 
     <div id="resultMsg"></div>
-    <a id="dlLink" href="#">結合済みファイルをダウンロード</a>
+    <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
 </div>
 
 <script>
-// Beat配列を絶対的な数値(Point)に変換する関数
+let rangeIdCounter = 1;
+
+// 範囲を追加する処理
+function addRange() {
+    const container = document.getElementById("rangesContainer");
+    const id = "range-" + rangeIdCounter++;
+    
+    const html = `
+    <div class="range-group clearfix" id="${id}">
+        <h4>範囲指定</h4>
+        <div class="form-group">
+            <label>始点Beat</label>
+            <input type="text" class="startBeat" placeholder="例: 23, 216, 288">
+        </div>
+        <div class="form-group">
+            <label>終点Beat</label>
+            <input type="text" class="endBeat" placeholder="例: 25, 72, 288">
+        </div>
+        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+    </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    updateRangeLabels();
+}
+
+// 範囲を削除する処理
+function removeRange(id) {
+    const container = document.getElementById("rangesContainer");
+    if (container.children.length <= 1) {
+        alert("最低でも1つの範囲指定が必要です！");
+        return;
+    }
+    document.getElementById(id).remove();
+    updateRangeLabels();
+}
+
+// 範囲1、範囲2…と表示を自動で振り直す処理
+function updateRangeLabels() {
+    const groups = document.querySelectorAll('.range-group h4');
+    groups.forEach((el, index) => {
+        el.innerText = `範囲 ${index + 1}`;
+    });
+}
+
+// === 以下、計算用関数群 ===
 function beatToPoint(beat) {
     if (!beat || beat.length !== 3) return 0;
     if (beat[2] === 0) return beat[0];
     return beat[0] + (beat[1] / beat[2]);
 }
 
-// 文字列からBeatの数字を抽出する関数
 function parseBeat(str) {
     if (!str) return null;
-    str = str.replace(/[０-９]/g, function(s) {
-        return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
-    });
+    str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
         return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
@@ -69,62 +128,67 @@ function parseBeat(str) {
     return null;
 }
 
-// 最大公約数を求める関数（約分用）
 function gcd(a, b) {
     return b === 0 ? a : gcd(b, a % b);
 }
 
-// beatに指定したインデックスの1万分の1（offset / 10000）を加算する関数
 function addOffsetToBeat(beat, offsetIndex) {
     if (!beat || beat.length !== 3 || offsetIndex === 0) return beat;
     const m = beat[0];
     const n = beat[1];
     const d = beat[2] === 0 ? 1 : beat[2];
     
-    // 分数 n/d に offsetIndex/10000 を足す
-    // 分母を d * 10000 に通分して足し算
     let newNum = n * 10000 + offsetIndex * d;
     let newDen = d * 10000;
     
-    // 繰り上がり（小節の増加）を計算
     let extraM = Math.floor(newNum / newDen);
     let newM = m + extraM;
     newNum = newNum % newDen;
     
-    if (newNum === 0) {
-        return [newM, 0, 0];
-    }
+    if (newNum === 0) return [newM, 0, 0];
     
-    // 約分して返す
     let g = gcd(newNum, newDen);
     return[newM, newNum / g, newDen / g];
 }
 
+// === メイン処理 ===
 function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
     
     msgDiv.innerHTML = "";
-    msgDiv.style.color = "#d32f2f";
+    msgDiv.style.color = "#333";
     dlLink.style.display = "none";
 
     if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
         return msgDiv.innerHTML = "ファイルを選択してください。";
     }
 
-    const startBeat = parseBeat(document.getElementById("startBeat").value);
-    const endBeat = parseBeat(document.getElementById("endBeat").value);
-
-    if (!startBeat || !endBeat) {
-        return msgDiv.innerHTML = "Beatのフォーマットが正しくありません。<br>数字が3つ入力されているか確認してください。";
-    }
-
-    const startPoint = beatToPoint(startBeat);
-    const endPoint = beatToPoint(endBeat);
+    // 複数の範囲指定をすべて読み取る
+    const rangeGroups = document.querySelectorAll('.range-group');
+    const ranges =[];
     
-    const minPoint = Math.min(startPoint, endPoint);
-    const maxPoint = Math.max(startPoint, endPoint);
+    for (let i = 0; i < rangeGroups.length; i++) {
+        const startStr = rangeGroups[i].querySelector('.startBeat').value;
+        const endStr = rangeGroups[i].querySelector('.endBeat').value;
+        const startBeat = parseBeat(startStr);
+        const endBeat = parseBeat(endStr);
+        
+        if (!startBeat || !endBeat) {
+            msgDiv.style.color = "#d32f2f";
+            return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。<br>空欄がないか確認してください。`;
+        }
+        
+        const startPoint = beatToPoint(startBeat);
+        const endPoint = beatToPoint(endBeat);
+        ranges.push({
+            index: i + 1,
+            min: Math.min(startPoint, endPoint),
+            max: Math.max(startPoint, endPoint)
+        });
+    }
 
     const file = fileInput.files[0];
     const reader = new FileReader();
@@ -132,94 +196,104 @@ function processMC() {
     reader.onload = function(e) {
         try {
             const data = JSON.parse(e.target.result);
-            if (!data.note) return msgDiv.innerHTML = "無効な譜面データです。（noteプロパティが見つかりません）";
+            if (!data.note) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "無効な譜面データです。";
+            }
 
             const notes = data.note;
-            const targetSlides = [];
-            const allSlidePoints =[];
+            let allDeletedNotes = new Set();
+            let totalJoinedCount = 0;
+            let resultLogs =[];
 
-            for (let i = 0; i < notes.length; i++) {
-                const note = notes[i];
-                if (note.seg && Array.isArray(note.seg)) {
-                    const point = beatToPoint(note.beat);
-                    allSlidePoints.push(point);
-                    if (point >= minPoint - 0.001 && point <= maxPoint + 0.001) {
-                        targetSlides.push(note);
+            // 各範囲ごとに処理を行う
+            for (let r = 0; r < ranges.length; r++) {
+                const range = ranges[r];
+                const targetSlides =[];
+
+                // この範囲に当てはまるスライドを探す
+                for (let i = 0; i < notes.length; i++) {
+                    const note = notes[i];
+                    if (allDeletedNotes.has(note)) continue; // すでに別の範囲で結合対象になったものは無視
+
+                    if (note.seg && Array.isArray(note.seg)) {
+                        const point = beatToPoint(note.beat);
+                        if (point >= range.min - 0.001 && point <= range.max + 0.001) {
+                            targetSlides.push(note);
+                        }
                     }
                 }
-            }
 
-            if (targetSlides.length < 2) {
-                let debugHTML = `<div class="debug-info">`;
-                debugHTML += `<b>【読み取り情報】</b><br>`;
-                debugHTML += `入力範囲: ${minPoint.toFixed(4)} ～ ${maxPoint.toFixed(4)}<br>`;
-                if (allSlidePoints.length > 0) {
-                    const sample = allSlidePoints.slice(0, 5).map(p => p.toFixed(4)).join(", ");
-                    debugHTML += `譜面内のスライド例: ${sample}...<br>`;
-                } else {
-                    debugHTML += `譜面内にスライドが見つかりませんでした。<br>`;
+                if (targetSlides.length < 2) {
+                    resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象が2つ未満のためスキップ</span>`);
+                    continue;
                 }
-                debugHTML += `</div>`;
-                return msgDiv.innerHTML = `指定範囲内に結合可能なスライドが2つ以上見つかりませんでした。(見つかった数: ${targetSlides.length})` + debugHTML;
-            }
 
-            targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
+                // スライドをソートして結合
+                targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
+                const mainSlide = targetSlides[0];
+                const newSeg =[];
 
-            const mainSlide = targetSlides[0];
-            const newSeg =[];
+                for (let i = 0; i < targetSlides.length; i++) {
+                    const slide = targetSlides[i];
+                    const segs = slide.seg;
+                    
+                    if (i % 2 === 0) {
+                        for (let j = 0; j < segs.length; j++) {
+                            let segItem = JSON.parse(JSON.stringify(segs[j]));
+                            segItem.beat = addOffsetToBeat(segItem.beat, i);
+                            newSeg.push(segItem);
+                        }
+                    } else {
+                        for (let j = segs.length - 1; j >= 0; j--) {
+                            let segItem = JSON.parse(JSON.stringify(segs[j]));
+                            segItem.beat = addOffsetToBeat(segItem.beat, i);
+                            newSeg.push(segItem);
+                        }
+                        let zeroItem = { "beat": [0, 0, 0], "x": 0 };
+                        zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
+                        newSeg.push(zeroItem);
+                    }
+                }
 
-            // スライドの結合処理（近似値ずらし適用）
-            for (let i = 0; i < targetSlides.length; i++) {
-                const slide = targetSlides[i];
-                const segs = slide.seg;
+                mainSlide.seg = newSeg;
                 
-                if (i % 2 === 0) {
-                    // 奇数番目 (そのまま追加)
-                    for (let j = 0; j < segs.length; j++) {
-                        let segItem = JSON.parse(JSON.stringify(segs[j]));
-                        segItem.beat = addOffsetToBeat(segItem.beat, i);
-                        newSeg.push(segItem);
-                    }
-                } else {
-                    // 偶数番目 (逆順にして追加)
-                    for (let j = segs.length - 1; j >= 0; j--) {
-                        let segItem = JSON.parse(JSON.stringify(segs[j]));
-                        segItem.beat = addOffsetToBeat(segItem.beat, i);
-                        newSeg.push(segItem);
-                    }
-                    // 最後にゼロに戻る要素を追加
-                    let zeroItem = { "beat": [0, 0, 0], "x": 0 };
-                    zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
-                    newSeg.push(zeroItem);
+                // メイン以外のスライドを削除リストに登録
+                for (let i = 1; i < targetSlides.length; i++) {
+                    allDeletedNotes.add(targetSlides[i]);
                 }
+                
+                totalJoinedCount += targetSlides.length;
+                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました</span>`);
             }
 
-            mainSlide.seg = newSeg;
-            const targetSet = new Set(targetSlides.slice(1));
-            data.note = notes.filter(n => !targetSet.has(n));
+            if (totalJoinedCount === 0) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "指定された範囲内に結合可能なスライドが一つも見つかりませんでした。";
+            }
+
+            // ゴミスライドを全体データから一括削除
+            data.note = notes.filter(n => !allDeletedNotes.has(n));
 
             const outJson = JSON.stringify(data); 
-            
-            // ファイルの保存処理
             const blob = new Blob([outJson], { type: "application/octet-stream" });
             const url = URL.createObjectURL(blob);
-            dlLink.href = url;
             
+            dlLink.href = url;
             let originalName = file.name;
             let dotIndex = originalName.lastIndexOf('.');
-            if(dotIndex !== -1) {
-                originalName = originalName.substring(0, dotIndex);
-            }
+            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
             dlLink.download = originalName + "_joined.mc";
             
             dlLink.style.display = "block";
             
-            msgDiv.style.color = "#28a745";
-            msgDiv.innerHTML = `${targetSlides.length}個のスライドを結合しました！`;
+            // 処理結果をまとめて表示
+            msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
 
         } catch (err) {
             console.error(err);
-            msgDiv.innerHTML = "ファイルの解析に失敗しました。正しいmcファイルか確認してください。";
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = "ファイルの解析に失敗しました。";
         }
     };
     reader.readAsText(file);
