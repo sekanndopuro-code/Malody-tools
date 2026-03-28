@@ -3,28 +3,228 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Malody Tools</title>
+    <title>Malody V ジグザグスライド結合ツール</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
         .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
-        h1 { font-size: 1.5em; text-align: center; margin-bottom: 20px; }
-        .tool-link { display: block; padding: 15px; margin-bottom: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; text-align: center; transition: 0.2s; }
-        .tool-link:hover { background: #0056b3; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        .note { font-size: 0.85em; color: #666; margin-top: 5px; display: block; }
+        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; width: 100%; transition: 0.2s; font-weight: bold; }
+        button:hover { background: #0056b3; }
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
+        #dlLink:hover { background: #218838; }
+        #resultMsg { margin-top: 15px; font-size: 0.9em; text-align: center; color: #d32f2f; font-weight: bold; line-height: 1.5; }
+        .debug-info { font-size: 0.8em; color: #666; margin-top: 10px; text-align: left; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Malody V ツール集</h1>
+    <h1>ジグザグスライド結合ツール</h1>
     
-    <!-- ここに作ったツールのファイル名を指定してリンクを増やす -->
-    <a href="Sikislide.html" class="tool-link">スライド結合ツール</a>
-    
-    <a href="Scroll 14_19_15.html" class="tool-link">scroll</a>
-    
-    <a href="tool3.html" class="tool-link">（あとで書き換える）</a>
-    
+    <div class="form-group">
+        <label>1. .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <div class="form-group">
+        <label>2. 結合の始点Beat</label>
+        <input type="text" id="startBeat" placeholder="例: 23, 216, 288 または[23,216,288]">
+        <span class="note">対象となる最初のスライドのbeatを入力してください。（カッコやスペースが含まれていてもOKです）</span>
+    </div>
+
+    <div class="form-group">
+        <label>3. 結合の終点Beat</label>
+        <input type="text" id="endBeat" placeholder="例: 25, 72, 288">
+        <span class="note">対象となる最後のスライドのbeatを入力してください。</span>
+    </div>
+
+    <button onclick="processMC()">スライドを結合する</button>
+
+    <div id="resultMsg"></div>
+    <a id="dlLink" href="#">結合済みファイルをダウンロード</a>
 </div>
+
+<script>
+// Beat配列を絶対的な数値(Point)に変換する関数
+function beatToPoint(beat) {
+    if (!beat || beat.length !== 3) return 0;
+    if (beat[2] === 0) return beat[0];
+    return beat[0] + (beat[1] / beat[2]);
+}
+
+// 文字列からBeatの数字を抽出する関数
+function parseBeat(str) {
+    if (!str) return null;
+    str = str.replace(/[０-９]/g, function(s) {
+        return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+    });
+    const parts = str.match(/-?\d+/g);
+    if (parts && parts.length >= 3) {
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    }
+    return null;
+}
+
+// 最大公約数を求める関数（約分用）
+function gcd(a, b) {
+    return b === 0 ? a : gcd(b, a % b);
+}
+
+// beatに指定したインデックスの1万分の1（offset / 10000）を加算する関数
+function addOffsetToBeat(beat, offsetIndex) {
+    if (!beat || beat.length !== 3 || offsetIndex === 0) return beat;
+    const m = beat[0];
+    const n = beat[1];
+    const d = beat[2] === 0 ? 1 : beat[2];
+    
+    // 分数 n/d に offsetIndex/10000 を足す
+    // 分母を d * 10000 に通分して足し算
+    let newNum = n * 10000 + offsetIndex * d;
+    let newDen = d * 10000;
+    
+    // 繰り上がり（小節の増加）を計算
+    let extraM = Math.floor(newNum / newDen);
+    let newM = m + extraM;
+    newNum = newNum % newDen;
+    
+    if (newNum === 0) {
+        return [newM, 0, 0];
+    }
+    
+    // 約分して返す
+    let g = gcd(newNum, newDen);
+    return[newM, newNum / g, newDen / g];
+}
+
+function processMC() {
+    const fileInput = document.getElementById("mcFile");
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlLink");
+    
+    msgDiv.innerHTML = "";
+    msgDiv.style.color = "#d32f2f";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        return msgDiv.innerHTML = "ファイルを選択してください。";
+    }
+
+    const startBeat = parseBeat(document.getElementById("startBeat").value);
+    const endBeat = parseBeat(document.getElementById("endBeat").value);
+
+    if (!startBeat || !endBeat) {
+        return msgDiv.innerHTML = "Beatのフォーマットが正しくありません。<br>数字が3つ入力されているか確認してください。";
+    }
+
+    const startPoint = beatToPoint(startBeat);
+    const endPoint = beatToPoint(endBeat);
+    
+    const minPoint = Math.min(startPoint, endPoint);
+    const maxPoint = Math.max(startPoint, endPoint);
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if (!data.note) return msgDiv.innerHTML = "無効な譜面データです。（noteプロパティが見つかりません）";
+
+            const notes = data.note;
+            const targetSlides = [];
+            const allSlidePoints =[];
+
+            for (let i = 0; i < notes.length; i++) {
+                const note = notes[i];
+                if (note.seg && Array.isArray(note.seg)) {
+                    const point = beatToPoint(note.beat);
+                    allSlidePoints.push(point);
+                    if (point >= minPoint - 0.001 && point <= maxPoint + 0.001) {
+                        targetSlides.push(note);
+                    }
+                }
+            }
+
+            if (targetSlides.length < 2) {
+                let debugHTML = `<div class="debug-info">`;
+                debugHTML += `<b>【読み取り情報】</b><br>`;
+                debugHTML += `入力範囲: ${minPoint.toFixed(4)} ～ ${maxPoint.toFixed(4)}<br>`;
+                if (allSlidePoints.length > 0) {
+                    const sample = allSlidePoints.slice(0, 5).map(p => p.toFixed(4)).join(", ");
+                    debugHTML += `譜面内のスライド例: ${sample}...<br>`;
+                } else {
+                    debugHTML += `譜面内にスライドが見つかりませんでした。<br>`;
+                }
+                debugHTML += `</div>`;
+                return msgDiv.innerHTML = `指定範囲内に結合可能なスライドが2つ以上見つかりませんでした。(見つかった数: ${targetSlides.length})` + debugHTML;
+            }
+
+            targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
+
+            const mainSlide = targetSlides[0];
+            const newSeg =[];
+
+            // スライドの結合処理（近似値ずらし適用）
+            for (let i = 0; i < targetSlides.length; i++) {
+                const slide = targetSlides[i];
+                const segs = slide.seg;
+                
+                if (i % 2 === 0) {
+                    // 奇数番目 (そのまま追加)
+                    for (let j = 0; j < segs.length; j++) {
+                        let segItem = JSON.parse(JSON.stringify(segs[j]));
+                        segItem.beat = addOffsetToBeat(segItem.beat, i);
+                        newSeg.push(segItem);
+                    }
+                } else {
+                    // 偶数番目 (逆順にして追加)
+                    for (let j = segs.length - 1; j >= 0; j--) {
+                        let segItem = JSON.parse(JSON.stringify(segs[j]));
+                        segItem.beat = addOffsetToBeat(segItem.beat, i);
+                        newSeg.push(segItem);
+                    }
+                    // 最後にゼロに戻る要素を追加
+                    let zeroItem = { "beat": [0, 0, 0], "x": 0 };
+                    zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
+                    newSeg.push(zeroItem);
+                }
+            }
+
+            mainSlide.seg = newSeg;
+            const targetSet = new Set(targetSlides.slice(1));
+            data.note = notes.filter(n => !targetSet.has(n));
+
+            const outJson = JSON.stringify(data); 
+            
+            // ファイルの保存処理
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            dlLink.href = url;
+            
+            let originalName = file.name;
+            let dotIndex = originalName.lastIndexOf('.');
+            if(dotIndex !== -1) {
+                originalName = originalName.substring(0, dotIndex);
+            }
+            dlLink.download = originalName + "_joined.mc";
+            
+            dlLink.style.display = "block";
+            
+            msgDiv.style.color = "#28a745";
+            msgDiv.innerHTML = `${targetSlides.length}個のスライドを結合しました！`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.innerHTML = "ファイルの解析に失敗しました。正しいmcファイルか確認してください。";
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
 
 </body>
 </html>
