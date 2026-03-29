@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>スライド結合ツール</title>
+    <title>Malody V ジグザグスライド結合ツール</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
         .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
@@ -13,6 +13,12 @@
         input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
         .note { font-size: 0.8em; color: #666; margin-top: 5px; display: block; }
         
+        /* 結合モードのスタイル */
+        .radio-group { background: #eef2f5; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #dce3e9; }
+        .radio-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
+        .radio-group label:last-child { margin-bottom: 0; }
+        .radio-desc { font-size: 0.85em; color: #555; margin-left: 25px; display: block; margin-top: 3px; line-height: 1.4; }
+
         /* 範囲指定ボックスのスタイル */
         .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
         .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
@@ -25,9 +31,7 @@
         .btn-process { background: #28a745; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
         .btn-process:hover { background: #218838; }
         
-        /* 回り込み解除 */
         .clearfix::after { content: ""; clear: both; display: table; }
-
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
@@ -36,11 +40,23 @@
 <body>
 
 <div class="container">
-    <h1>スライド結合ツール</h1>
+    <h1>ジグザグスライド結合ツール</h1>
     
-    <div class="form-group" style="margin-bottom: 25px;">
+    <div class="form-group" style="margin-bottom: 20px;">
         <label>📁 対象の .mcファイルを選択</label>
         <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <div class="radio-group">
+        <label style="font-weight: bold; margin-bottom: 10px; color: #222;">⚙️ 結合モード設定</label>
+        <label>
+            <input type="radio" name="joinMode" value="relative" checked> <b>始点X座標を基準にする (おすすめ)</b>
+            <span class="radio-desc">後続スライドのX座標のズレを自動計算し、segの数値を補正します。形を保ったままなめらかに繋がります。</span>
+        </label>
+        <label>
+            <input type="radio" name="joinMode" value="asis"> <b>数値をそのまま結合する</b>
+            <span class="radio-desc">元のsegの数値を一切いじらずにコピーします。(折り返しの追加点はx:0固定)</span>
+        </label>
     </div>
 
     <!-- ここに範囲指定のボックスが追加されていく -->
@@ -49,18 +65,18 @@
             <h4>範囲 1</h4>
             <div class="form-group">
                 <label>始点Beat</label>
-                <input type="text" class="startBeat" placeholder="例: 1, 0, 0">
+                <input type="text" class="startBeat" placeholder="例: 23, 216, 288">
             </div>
             <div class="form-group">
                 <label>終点Beat</label>
-                <input type="text" class="endBeat" placeholder="例: 3, 1, 2">
+                <input type="text" class="endBeat" placeholder="例: 25, 72, 288">
             </div>
             <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
         </div>
     </div>
 
-    <button type="button" class="btn-add" onclick="addRange()">選択範囲を追加する</button>
-    <button type="button" class="btn-process" onclick="processMC()">結合処理を実行</button>
+    <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    <button type="button" class="btn-process" onclick="processMC()">🚀 一括で結合処理を実行</button>
 
     <div id="resultMsg"></div>
     <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
@@ -69,11 +85,9 @@
 <script>
 let rangeIdCounter = 1;
 
-// 範囲を追加する処理
 function addRange() {
     const container = document.getElementById("rangesContainer");
     const id = "range-" + rangeIdCounter++;
-    
     const html = `
     <div class="range-group clearfix" id="${id}">
         <h4>範囲指定</h4>
@@ -92,7 +106,6 @@ function addRange() {
     updateRangeLabels();
 }
 
-// 範囲を削除する処理
 function removeRange(id) {
     const container = document.getElementById("rangesContainer");
     if (container.children.length <= 1) {
@@ -103,7 +116,6 @@ function removeRange(id) {
     updateRangeLabels();
 }
 
-// 範囲1、範囲2…と表示を自動で振り直す処理
 function updateRangeLabels() {
     const groups = document.querySelectorAll('.range-group h4');
     groups.forEach((el, index) => {
@@ -111,7 +123,6 @@ function updateRangeLabels() {
     });
 }
 
-// === 以下、計算用関数群 ===
 function beatToPoint(beat) {
     if (!beat || beat.length !== 3) return 0;
     if (beat[2] === 0) return beat[0];
@@ -123,7 +134,7 @@ function parseBeat(str) {
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
@@ -132,6 +143,7 @@ function gcd(a, b) {
     return b === 0 ? a : gcd(b, a % b);
 }
 
+// ダブり回避のための1万分の1ずらし処理
 function addOffsetToBeat(beat, offsetIndex) {
     if (!beat || beat.length !== 3 || offsetIndex === 0) return beat;
     const m = beat[0];
@@ -145,17 +157,17 @@ function addOffsetToBeat(beat, offsetIndex) {
     let newM = m + extraM;
     newNum = newNum % newDen;
     
-    if (newNum === 0) return [newM, 0, 0];
+    if (newNum === 0) return[newM, 0, 0];
     
     let g = gcd(newNum, newDen);
     return[newM, newNum / g, newDen / g];
 }
 
-// === メイン処理 ===
 function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
+    const joinMode = document.querySelector('input[name="joinMode"]:checked').value;
     
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
@@ -166,7 +178,6 @@ function processMC() {
         return msgDiv.innerHTML = "ファイルを選択してください。";
     }
 
-    // 複数の範囲指定をすべて読み取る
     const rangeGroups = document.querySelectorAll('.range-group');
     const ranges =[];
     
@@ -206,15 +217,13 @@ function processMC() {
             let totalJoinedCount = 0;
             let resultLogs =[];
 
-            // 各範囲ごとに処理を行う
             for (let r = 0; r < ranges.length; r++) {
                 const range = ranges[r];
                 const targetSlides =[];
 
-                // この範囲に当てはまるスライドを探す
                 for (let i = 0; i < notes.length; i++) {
                     const note = notes[i];
-                    if (allDeletedNotes.has(note)) continue; // すでに別の範囲で結合対象になったものは無視
+                    if (allDeletedNotes.has(note)) continue;
 
                     if (note.seg && Array.isArray(note.seg)) {
                         const point = beatToPoint(note.beat);
@@ -229,28 +238,43 @@ function processMC() {
                     continue;
                 }
 
-                // スライドをソートして結合
                 targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
                 const mainSlide = targetSlides[0];
                 const newSeg =[];
+
+                // 1番目のスライドのX座標を取得（基準値）
+                const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
                 for (let i = 0; i < targetSlides.length; i++) {
                     const slide = targetSlides[i];
                     const segs = slide.seg;
                     
+                    // 現在処理中のスライドのX座標を取得し、1番目との「差分」を計算
+                    const currentX = (typeof slide.x === 'number') ? slide.x : 0;
+                    const offsetX = (joinMode === "relative") ? (currentX - mainX) : 0;
+                    
                     if (i % 2 === 0) {
                         for (let j = 0; j < segs.length; j++) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
+                            // X座標を補正
+                            if (joinMode === "relative" && typeof segItem.x === 'number') {
+                                segItem.x = segItem.x + offsetX;
+                            }
                             newSeg.push(segItem);
                         }
                     } else {
                         for (let j = segs.length - 1; j >= 0; j--) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
+                            // X座標を補正
+                            if (joinMode === "relative" && typeof segItem.x === 'number') {
+                                segItem.x = segItem.x + offsetX;
+                            }
                             newSeg.push(segItem);
                         }
-                        let zeroItem = { "beat": [0, 0, 0], "x": 0 };
+                        // 追加する戻り点のX座標も補正値を適用する
+                        let zeroItem = { "beat": [0, 0, 0], "x": (joinMode === "relative" ? offsetX : 0) };
                         zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
                         newSeg.push(zeroItem);
                     }
@@ -258,7 +282,6 @@ function processMC() {
 
                 mainSlide.seg = newSeg;
                 
-                // メイン以外のスライドを削除リストに登録
                 for (let i = 1; i < targetSlides.length; i++) {
                     allDeletedNotes.add(targetSlides[i]);
                 }
@@ -272,7 +295,6 @@ function processMC() {
                 return msgDiv.innerHTML = "指定された範囲内に結合可能なスライドが一つも見つかりませんでした。";
             }
 
-            // ゴミスライドを全体データから一括削除
             data.note = notes.filter(n => !allDeletedNotes.has(n));
 
             const outJson = JSON.stringify(data); 
@@ -287,7 +309,6 @@ function processMC() {
             
             dlLink.style.display = "block";
             
-            // 処理結果をまとめて表示
             msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
 
         } catch (err) {
