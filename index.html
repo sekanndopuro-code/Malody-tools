@@ -140,24 +140,73 @@ function gcd(a, b) {
     return b === 0 ? a : gcd(b, a % b);
 }
 
-// ダブり回避のための1万分の1ずらし処理
+// ダブり回避のための1万分の1ずらし処理 (スライド間用)
 function addOffsetToBeat(beat, offsetIndex) {
     if (!beat || beat.length !== 3 || offsetIndex === 0) return beat;
     const m = beat[0];
     const n = beat[1];
     const d = beat[2] === 0 ? 1 : beat[2];
-    
     let newNum = n * 10000 + offsetIndex * d;
     let newDen = d * 10000;
-    
     let extraM = Math.floor(newNum / newDen);
     let newM = m + extraM;
     newNum = newNum % newDen;
-    
     if (newNum === 0) return[newM, 0, 0];
-    
     let g = gcd(newNum, newDen);
     return[newM, newNum / g, newDen / g];
+}
+
+// 【NEW】重複バグ修正のための超微小ずらし処理 (約1000万分の1)
+function addMicroOffsetToBeat(beat, offsetCount) {
+    if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
+    const m = beat[0];
+    const n = beat[1];
+    const d = beat[2] === 0 ? 1 : beat[2];
+    const MICRO_DEN = 9999999; 
+    let newNum = n * MICRO_DEN + offsetCount * d;
+    let newDen = d * MICRO_DEN;
+    let extraM = Math.floor(newNum / newDen);
+    let newM = m + extraM;
+    newNum = newNum % newDen;
+    if (newNum === 0) return[newM, 0, 0];
+    let g = gcd(newNum, newDen);
+    return[newM, newNum / g, newDen / g];
+}
+
+// 【NEW】配列内のbeat重複を検知し、微小にずらして修正する関数
+function fixDuplicateSegs(segArray) {
+    let usedPoints =[];
+    let fixedCount = 0;
+    
+    for (let i = 0; i < segArray.length; i++) {
+        let segItem = segArray[i];
+        let p = beatToPoint(segItem.beat);
+        
+        let conflictCount = 0;
+        let isConflict = true;
+        let currentP = p;
+        
+        while (isConflict) {
+            isConflict = false;
+            for (let j = 0; j < usedPoints.length; j++) {
+                // 誤差 1e-10 未満を同一(重複)とみなす
+                if (Math.abs(currentP - usedPoints[j]) < 1e-10) {
+                    isConflict = true;
+                    conflictCount++;
+                    // 1000万分の1ずつずらして再チェック
+                    currentP = p + (conflictCount / 9999999);
+                    break;
+                }
+            }
+        }
+        
+        if (conflictCount > 0) {
+            segItem.beat = addMicroOffsetToBeat(segItem.beat, conflictCount);
+            fixedCount++;
+        }
+        usedPoints.push(currentP);
+    }
+    return fixedCount;
 }
 
 function processMC() {
@@ -239,7 +288,6 @@ function processMC() {
                 const mainSlide = targetSlides[0];
                 const newSeg =[];
 
-                // 1番目のスライドのX座標を取得（基準値）
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
                 for (let i = 0; i < targetSlides.length; i++) {
@@ -250,12 +298,10 @@ function processMC() {
                     const offsetX = (joinMode === "relative") ? (currentX - mainX) : 0;
                     
                     if (i % 2 === 0) {
-                        // ▼ 奇数番目 (1番目, 3番目, 5番目...)
-                        
-                        // 3番目(i=2)以降の奇数番目の最初には、消えてしまう「元の始点」を中継点として補完する
+                        // 3番目以降の奇数番目には、消滅する始点を中継点として追加する
                         if (i > 0) {
                             let startItem = { 
-                                "beat":[0, 1, 99999], // 重複回避のため専用の近似値(1/99999)を使用
+                                "beat":[0, 1, 99999], 
                                 "x": (joinMode === "relative" ? offsetX : 0) 
                             };
                             newSeg.push(startItem);
@@ -270,7 +316,7 @@ function processMC() {
                             newSeg.push(segItem);
                         }
                     } else {
-                        // ▼ 偶数番目 (2番目, 4番目, 6番目...)
+                        // 偶数番目
                         for (let j = segs.length - 1; j >= 0; j--) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
@@ -279,13 +325,14 @@ function processMC() {
                             }
                             newSeg.push(segItem);
                         }
-                        // 最後にゼロに戻る要素を追加
                         let zeroItem = { "beat": [0, 0, 0], "x": (joinMode === "relative" ? offsetX : 0) };
                         zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
                         newSeg.push(zeroItem);
                     }
                 }
 
+                // 【NEW】メインスライドに流し込む直前に、重複しているポイントをパトロールして修正する
+                let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
                 for (let i = 1; i < targetSlides.length; i++) {
@@ -293,7 +340,8 @@ function processMC() {
                 }
                 
                 totalJoinedCount += targetSlides.length;
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました</span>`);
+                let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修正✨)` : "";
+                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${fixMsg}</span>`);
             }
 
             if (totalJoinedCount === 0) {
