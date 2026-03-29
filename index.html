@@ -46,14 +46,14 @@
     </div>
 
     <div class="radio-group">
-        <label style="font-weight: bold; margin-bottom: 10px; color: #222;">⚙️ 結合モード設定</label>
+        <label style="font-weight: bold; margin-bottom: 10px; color: #222;">⏱️ タイミング結合モード設定</label>
         <label>
-            <input type="radio" name="joinMode" value="relative" checked> <b>始点X座標を基準にする (おすすめ)</b>
-            <span class="radio-desc">後続スライドのX座標のズレを自動計算し、segの数値を補正します。形を保ったままなめらかに繋がります。</span>
+            <input type="radio" name="timeMode" value="keep" checked> <b>スライドの配置間隔を保つ (おすすめ)</b>
+            <span class="radio-desc">スライドごとの開始時間の差（変位）を計算し、セグメントに足します。エディタ上の見た目通りのタイミングで折り返します。</span>
         </label>
         <label>
-            <input type="radio" name="joinMode" value="asis"> <b>数値をそのまま結合する</b>
-            <span class="radio-desc">元のsegの数値を一切いじらずにコピーします。</span>
+            <input type="radio" name="timeMode" value="pack"> <b>間隔を詰めて結合する</b>
+            <span class="radio-desc">配置間隔を無視し、セグメントの数値をそのまま繋げます。（これまでの挙動）</span>
         </label>
     </div>
 
@@ -62,18 +62,18 @@
             <h4>範囲 1</h4>
             <div class="form-group">
                 <label>始点Beat</label>
-                <input type="text" class="startBeat" placeholder="例: 23, 216, 288">
+                <input type="text" class="startBeat" placeholder="例: 2, 0, 0 または[2, 0, 0]">
             </div>
             <div class="form-group">
                 <label>終点Beat</label>
-                <input type="text" class="endBeat" placeholder="例: 25, 72, 288">
+                <input type="text" class="endBeat" placeholder="例: 3, 1, 2">
             </div>
             <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
         </div>
     </div>
 
     <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
-    <button type="button" class="btn-process" onclick="processMC()">結合処理を実行</button>
+    <button type="button" class="btn-process" onclick="processMC()">🚀 一括で結合処理を実行</button>
 
     <div id="resultMsg"></div>
     <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
@@ -90,11 +90,11 @@ function addRange() {
         <h4>範囲指定</h4>
         <div class="form-group">
             <label>始点Beat</label>
-            <input type="text" class="startBeat" placeholder="例: 23, 216, 288">
+            <input type="text" class="startBeat" placeholder="例: 2, 0, 0 または [2, 0, 0]">
         </div>
         <div class="form-group">
             <label>終点Beat</label>
-            <input type="text" class="endBeat" placeholder="例: 25, 72, 288">
+            <input type="text" class="endBeat" placeholder="例: 3, 1, 2">
         </div>
         <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
     </div>
@@ -131,7 +131,7 @@ function parseBeat(str) {
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
@@ -140,14 +140,61 @@ function gcd(a, b) {
     return b === 0 ? a : gcd(b, a % b);
 }
 
-// ダブり回避のための1万分の1ずらし処理 (スライド間用)
+// === Beat（時間）の分数を正確に計算する関数群 ===
+
+// 2つのBeatの「差（変位）」を求める (beat1 - beat2)
+function beatDiff(beat1, beat2) {
+    if (!beat1) return [0, 0, 0];
+    if (!beat2) return [...beat1];
+    
+    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
+    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    
+    const num1 = (m1 * d1 + n1) * d2;
+    const num2 = (m2 * d2 + n2) * d1;
+    const den = d1 * d2;
+    
+    let diffNum = num1 - num2;
+    if (diffNum < 0) diffNum = 0; // マイナスになることは想定外だが0に丸める
+    
+    const m = Math.floor(diffNum / den);
+    const n = diffNum % den;
+    
+    if (n === 0) return [m, 0, 0];
+    const g = gcd(n, den);
+    return [m, n / g, den / g];
+}
+
+// 2つのBeatを足し算する (beat1 + beat2)
+function beatAdd(beat1, beat2) {
+    if (!beat1) return [...beat2];
+    if (!beat2) return [...beat1];
+    
+    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
+    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    
+    const num1 = n1 * d2;
+    const num2 = n2 * d1;
+    const den = d1 * d2;
+    
+    let num = num1 + num2;
+    let m = m1 + m2 + Math.floor(num / den);
+    let n = num % den;
+    
+    if (n === 0) return [m, 0, 0];
+    const g = gcd(n, den);
+    return [m, n / g, den / g];
+}
+
+// 結合時のダブり回避のためのずらし処理 (安全な分母 8477 を使用)
 function addOffsetToBeat(beat, offsetIndex) {
     if (!beat || beat.length !== 3 || offsetIndex === 0) return beat;
     const m = beat[0];
-    const n = beat[1];
-    const d = beat[2] === 0 ? 1 : beat[2];
-    let newNum = n * 10000 + offsetIndex * d;
-    let newDen = d * 10000;
+    const n = beat[1] || 0;
+    const d = beat[2] === 0 ? 1 : (beat[2] || 1);
+    const DEN = 8477; 
+    let newNum = n * DEN + offsetIndex * d;
+    let newDen = d * DEN;
     let extraM = Math.floor(newNum / newDen);
     let newM = m + extraM;
     newNum = newNum % newDen;
@@ -156,28 +203,27 @@ function addOffsetToBeat(beat, offsetIndex) {
     return[newM, newNum / g, newDen / g];
 }
 
-// 【NEW】重複バグ修正のための超微小ずらし処理 (約1000万分の1)
-function addMicroOffsetToBeat(beat, offsetCount) {
-    if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
-    const m = beat[0];
-    const n = beat[1];
-    const d = beat[2] === 0 ? 1 : beat[2];
-    const MICRO_DEN = 9999999; 
-    let newNum = n * MICRO_DEN + offsetCount * d;
-    let newDen = d * MICRO_DEN;
-    let extraM = Math.floor(newNum / newDen);
-    let newM = m + extraM;
-    newNum = newNum % newDen;
-    if (newNum === 0) return[newM, 0, 0];
-    let g = gcd(newNum, newDen);
-    return[newM, newNum / g, newDen / g];
-}
-
-// 【NEW】配列内のbeat重複を検知し、微小にずらして修正する関数
+// 重複バグ修復用のパトロール関数
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
+    const MICRO_DEN = 9001; // ずらし(8477)と被らないように別の素数を使用
     
+    function addMicroOffset(beat, offsetCount) {
+        if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
+        const m = beat[0];
+        const n = beat[1];
+        const d = beat[2] === 0 ? 1 : beat[2];
+        let newNum = n * MICRO_DEN + offsetCount * d;
+        let newDen = d * MICRO_DEN;
+        let extraM = Math.floor(newNum / newDen);
+        let newM = m + extraM;
+        newNum = newNum % newDen;
+        if (newNum === 0) return [newM, 0, 0];
+        let g = gcd(newNum, newDen);
+        return[newM, newNum / g, newDen / g];
+    }
+
     for (let i = 0; i < segArray.length; i++) {
         let segItem = segArray[i];
         let p = beatToPoint(segItem.beat);
@@ -189,19 +235,17 @@ function fixDuplicateSegs(segArray) {
         while (isConflict) {
             isConflict = false;
             for (let j = 0; j < usedPoints.length; j++) {
-                // 誤差 1e-10 未満を同一(重複)とみなす
                 if (Math.abs(currentP - usedPoints[j]) < 1e-10) {
                     isConflict = true;
                     conflictCount++;
-                    // 1000万分の1ずつずらして再チェック
-                    currentP = p + (conflictCount / 9999999);
+                    currentP = p + (conflictCount / MICRO_DEN);
                     break;
                 }
             }
         }
         
         if (conflictCount > 0) {
-            segItem.beat = addMicroOffsetToBeat(segItem.beat, conflictCount);
+            segItem.beat = addMicroOffset(segItem.beat, conflictCount);
             fixedCount++;
         }
         usedPoints.push(currentP);
@@ -213,7 +257,7 @@ function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
-    const joinMode = document.querySelector('input[name="joinMode"]:checked').value;
+    const timeMode = document.querySelector('input[name="timeMode"]:checked').value;
     
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
@@ -288,50 +332,59 @@ function processMC() {
                 const mainSlide = targetSlides[0];
                 const newSeg =[];
 
+                // 【X座標の補正】常にメインスライドを基準に相対的にずらす
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
+                const mainBeat = mainSlide.beat;
 
                 for (let i = 0; i < targetSlides.length; i++) {
                     const slide = targetSlides[i];
                     const segs = slide.seg;
                     
                     const currentX = (typeof slide.x === 'number') ? slide.x : 0;
-                    const offsetX = (joinMode === "relative") ? (currentX - mainX) : 0;
+                    const offsetX = currentX - mainX; 
+                    
+                    // 【Beatの補正】スライド間の配置間隔（変位）を計算
+                    const baseBeat = (timeMode === "keep") ? beatDiff(slide.beat, mainBeat) : [0, 0, 0];
                     
                     if (i % 2 === 0) {
-                        // 3番目以降の奇数番目には、消滅する始点を中継点として追加する
+                        // 3番目以降の奇数番目には、消滅する始点を中継点として追加
                         if (i > 0) {
                             let startItem = { 
-                                "beat":[0, 1, 99999], 
-                                "x": (joinMode === "relative" ? offsetX : 0) 
+                                "beat": (timeMode === "pack") ?[0, 1, 8477] : [...baseBeat],
+                                "x": offsetX
                             };
+                            startItem.beat = addOffsetToBeat(startItem.beat, i);
                             newSeg.push(startItem);
                         }
 
                         for (let j = 0; j < segs.length; j++) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
+                            // 間隔変位を足し、ダブり回避の微小ずらしを入れる
+                            segItem.beat = beatAdd(segItem.beat, baseBeat);
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
-                            if (joinMode === "relative" && typeof segItem.x === 'number') {
+                            if (typeof segItem.x === 'number') {
                                 segItem.x = segItem.x + offsetX;
                             }
                             newSeg.push(segItem);
                         }
                     } else {
-                        // 偶数番目
+                        // 偶数番目は逆順
                         for (let j = segs.length - 1; j >= 0; j--) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
+                            segItem.beat = beatAdd(segItem.beat, baseBeat);
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
-                            if (joinMode === "relative" && typeof segItem.x === 'number') {
+                            if (typeof segItem.x === 'number') {
                                 segItem.x = segItem.x + offsetX;
                             }
                             newSeg.push(segItem);
                         }
-                        let zeroItem = { "beat": [0, 0, 0], "x": (joinMode === "relative" ? offsetX : 0) };
+                        let zeroItem = { "beat": [...baseBeat], "x": offsetX };
                         zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
                         newSeg.push(zeroItem);
                     }
                 }
 
-                // 【NEW】メインスライドに流し込む直前に、重複しているポイントをパトロールして修正する
+                // 重複しているポイントをパトロールして修正
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
