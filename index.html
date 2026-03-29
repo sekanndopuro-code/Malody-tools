@@ -13,13 +13,11 @@
         input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
         .note { font-size: 0.8em; color: #666; margin-top: 5px; display: block; }
         
-        /* 結合モードのスタイル */
         .radio-group { background: #eef2f5; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #dce3e9; }
         .radio-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
         .radio-group label:last-child { margin-bottom: 0; }
         .radio-desc { font-size: 0.85em; color: #555; margin-left: 25px; display: block; margin-top: 3px; line-height: 1.4; }
 
-        /* 範囲指定ボックスのスタイル */
         .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
         .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
         
@@ -51,15 +49,14 @@
         <label style="font-weight: bold; margin-bottom: 10px; color: #222;">⚙️ 結合モード設定</label>
         <label>
             <input type="radio" name="joinMode" value="relative" checked> <b>始点X座標を基準にする (おすすめ)</b>
-            <span class="radio-desc">後続スライドのX座標のズレを自動計算し、segの数値を補正します。</span>
+            <span class="radio-desc">後続スライドのX座標のズレを自動計算し、segの数値を補正します。形を保ったままなめらかに繋がります。</span>
         </label>
         <label>
             <input type="radio" name="joinMode" value="asis"> <b>数値をそのまま結合する</b>
-            <span class="radio-desc">元のsegの数値を一切いじらずにコピーします。(折り返しの追加点はx:0固定)</span>
+            <span class="radio-desc">元のsegの数値を一切いじらずにコピーします。</span>
         </label>
     </div>
 
-    <!-- ここに範囲指定のボックスが追加されていく -->
     <div id="rangesContainer">
         <div class="range-group clearfix" id="range-0">
             <h4>範囲 1</h4>
@@ -249,31 +246,40 @@ function processMC() {
                     const slide = targetSlides[i];
                     const segs = slide.seg;
                     
-                    // 現在処理中のスライドのX座標を取得し、1番目との「差分」を計算
                     const currentX = (typeof slide.x === 'number') ? slide.x : 0;
                     const offsetX = (joinMode === "relative") ? (currentX - mainX) : 0;
                     
                     if (i % 2 === 0) {
+                        // ▼ 奇数番目 (1番目, 3番目, 5番目...)
+                        
+                        // 3番目(i=2)以降の奇数番目の最初には、消えてしまう「元の始点」を中継点として補完する
+                        if (i > 0) {
+                            let startItem = { 
+                                "beat":[0, 1, 99999], // 重複回避のため専用の近似値(1/99999)を使用
+                                "x": (joinMode === "relative" ? offsetX : 0) 
+                            };
+                            newSeg.push(startItem);
+                        }
+
                         for (let j = 0; j < segs.length; j++) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
-                            // X座標を補正
                             if (joinMode === "relative" && typeof segItem.x === 'number') {
                                 segItem.x = segItem.x + offsetX;
                             }
                             newSeg.push(segItem);
                         }
                     } else {
+                        // ▼ 偶数番目 (2番目, 4番目, 6番目...)
                         for (let j = segs.length - 1; j >= 0; j--) {
                             let segItem = JSON.parse(JSON.stringify(segs[j]));
                             segItem.beat = addOffsetToBeat(segItem.beat, i);
-                            // X座標を補正
                             if (joinMode === "relative" && typeof segItem.x === 'number') {
                                 segItem.x = segItem.x + offsetX;
                             }
                             newSeg.push(segItem);
                         }
-                        // 追加する戻り点のX座標も補正値を適用する
+                        // 最後にゼロに戻る要素を追加
                         let zeroItem = { "beat": [0, 0, 0], "x": (joinMode === "relative" ? offsetX : 0) };
                         zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
                         newSeg.push(zeroItem);
