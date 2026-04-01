@@ -40,7 +40,7 @@
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
-        <label> .mcファイルを選択</label>
+        <label>📁 .mcファイルを選択</label>
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
@@ -63,7 +63,7 @@
     <button type="button" class="btn-process" onclick="processMC()">結合を実行</button>
 
     <div id="resultMsg"></div>
-    <a id="dlLink" href="#">結合済みファイルをダウンロード</a>
+    <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
 </div>
 
 <script>
@@ -126,7 +126,7 @@ function parseBeat(str) {
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function beatDiff(beat1, beat2) {
-    if (!beat1) return [0, 0, 0];
+    if (!beat1) return[0, 0, 0];
     if (!beat2) return [...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
@@ -174,7 +174,7 @@ function fixDuplicateSegs(segArray) {
         newNum = newNum % newDen;
         if (newNum === 0) return [newM, 0, 0];
         let g = gcd(newNum, newDen);
-        return [newM, newNum / g, newDen / g];
+        return[newM, newNum / g, newDen / g];
     }
 
     for (let i = 0; i < segArray.length; i++) {
@@ -277,8 +277,9 @@ function processMC() {
                     }
                 }
 
-                if (targetSlides.length < 2) {
-                    resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象が2つ未満のためスキップ</span>`);
+                // ★変更点：1つだけでも作動するように変更
+                if (targetSlides.length < 1) {
+                    resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象スライドが見つからないためスキップ</span>`);
                     continue;
                 }
 
@@ -296,45 +297,47 @@ function processMC() {
                     }
                 }
 
-                // 2. 枝スライドの往復ブロック群を追加
-                for (let i = 1; i < targetSlides.length; i++) {
-                    const branch = targetSlides[i];
-                    const branchSegs = branch.seg ||[];
-                    
-                    const branchX = (typeof branch.x === 'number') ? branch.x : 0;
-                    const offsetX = branchX - mainX;
-                    const offsetBeat = beatDiff(branch.beat, mainBeat);
+                // 2. 枝スライドの往復ブロック群を追加 (2個以上ある場合のみ)
+                if (targetSlides.length >= 2) {
+                    for (let i = 1; i < targetSlides.length; i++) {
+                        const branch = targetSlides[i];
+                        const branchSegs = branch.seg ||[];
+                        
+                        const branchX = (typeof branch.x === 'number') ? branch.x : 0;
+                        const offsetX = branchX - mainX;
+                        const offsetBeat = beatDiff(branch.beat, mainBeat);
 
-                    // 枝の終点の相対Beatを計算 (ジャンプ元の基準時間)
-                    let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat :[0,0,0];
-                    let endRelBeat = beatAdd(offsetBeat, lastSegBeat);
+                        // 枝の終点の相対Beatを計算 (ジャンプ元の基準時間)
+                        let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat :[0,0,0];
+                        let endRelBeat = beatAdd(offsetBeat, lastSegBeat);
 
-                    let block =[];
+                        let block =[];
 
-                    // 【分岐点】幹の座標 (x:0) からスタート
-                    block.push({ beat: [...endRelBeat], x: 0 });
+                        // 【分岐点】幹の座標 (x:0) からスタート
+                        block.push({ beat: [...endRelBeat], x: 0 });
 
-                    // 【復路】終点から始点へ（逆順）
-                    for (let j = branchSegs.length - 1; j >= 0; j--) {
-                        let s = branchSegs[j];
-                        block.push({ beat: beatAdd(offsetBeat, s.beat), x: offsetX + s.x });
-                    }
-                    
-                    // 【始点】枝の元々の始点
-                    block.push({ beat: [...offsetBeat], x: offsetX });
+                        // 【復路】終点から始点へ（逆順）
+                        for (let j = branchSegs.length - 1; j >= 0; j--) {
+                            let s = branchSegs[j];
+                            block.push({ beat: beatAdd(offsetBeat, s.beat), x: offsetX + s.x });
+                        }
+                        
+                        // 【始点】枝の元々の始点
+                        block.push({ beat:[...offsetBeat], x: offsetX });
 
-                    // 【往路】始点から終点へ（順順）
-                    for (let j = 0; j < branchSegs.length; j++) {
-                        let s = branchSegs[j];
-                        block.push({ beat: beatAdd(offsetBeat, s.beat), x: offsetX + s.x });
-                    }
+                        // 【往路】始点から終点へ（順順）
+                        for (let j = 0; j < branchSegs.length; j++) {
+                            let s = branchSegs[j];
+                            block.push({ beat: beatAdd(offsetBeat, s.beat), x: offsetX + s.x });
+                        }
 
-                    // 【帰還点】幹の座標 (x:0) に戻る
-                    block.push({ beat: [...endRelBeat], x: 0 });
+                        // 【帰還点】幹の座標 (x:0) に戻る
+                        block.push({ beat: [...endRelBeat], x: 0 });
 
-                    // ブロックをnewSegに追加
-                    for (let b of block) {
-                        newSeg.push(b);
+                        // ブロックをnewSegに追加
+                        for (let b of block) {
+                            newSeg.push(b);
+                        }
                     }
                 }
 
@@ -348,8 +351,15 @@ function processMC() {
                 }
                 
                 totalJoinedCount += targetSlides.length;
-                let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動回避✨)` : "";
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${fixMsg}</span>`);
+                
+                // ログの出し分け（1個のときは修復報告のみ）
+                if (targetSlides.length === 1) {
+                    let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : " (重複なし)";
+                    resultLogs.push(`<span style="color:#17a2b8;">ℹ️ 範囲 ${range.index}: 1個のみ検知されたため、バグ修復のみ実行しました${fixMsg}</span>`);
+                } else {
+                    let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : "";
+                    resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${fixMsg}</span>`);
+                }
             }
 
             if (totalJoinedCount === 0) {
@@ -368,7 +378,7 @@ function processMC() {
             let originalName = file.name;
             let dotIndex = originalName.lastIndexOf('.');
             if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
-            dlLink.download = originalName + "_tree_joined.mc";
+            dlLink.download = originalName + "_joined.mc";
             
             dlLink.style.display = "block";
             
