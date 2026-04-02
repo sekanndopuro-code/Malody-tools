@@ -35,8 +35,8 @@
 <div class="container">
     <h1>スライド結合ツール</h1>
     <p class="desc">
-        終点(一番最後のseg)が一番早いスライドを「メイン幹」とします。<br>
-        他の装飾スライドは「幹(x=0) → 終点 → 始点 → 終点 → 幹(x=0)」という往復ブロックに変換されます。(仮)
+        始点が一番早いスライドを「メイン幹」とします。<br>
+        他の装飾スライドは終点が早い順に「幹(x=0) → 終点 → 始点 → 終点 → 幹(x=0)」という往復ブロックに変換されます。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -113,7 +113,7 @@ function beatToPoint(beat) {
     return beat[0] + (beat[1] / beat[2]);
 }
 
-// 【追加】スライドの「終点」のPoint値を計算する関数
+// スライドの「終点」のPoint値を計算する関数
 function getEndPoint(note) {
     let startPoint = beatToPoint(note.beat);
     if (note.seg && note.seg.length > 0) {
@@ -128,7 +128,7 @@ function parseBeat(str) {
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
@@ -136,8 +136,8 @@ function parseBeat(str) {
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function beatDiff(beat1, beat2) {
-    if (!beat1) return[0, 0, 0];
-    if (!beat2) return [...beat1];
+    if (!beat1) return [0, 0, 0];
+    if (!beat2) return[...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
     const num1 = (m1 * d1 + n1) * d2;
@@ -153,7 +153,7 @@ function beatDiff(beat1, beat2) {
 }
 
 function beatAdd(beat1, beat2) {
-    if (!beat1) return [...beat2];
+    if (!beat1) return[...beat2];
     if (!beat2) return [...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
@@ -163,9 +163,9 @@ function beatAdd(beat1, beat2) {
     let num = num1 + num2;
     let m = m1 + m2 + Math.floor(num / den);
     let n = num % den;
-    if (n === 0) return[m, 0, 0];
+    if (n === 0) return [m, 0, 0];
     const g = gcd(n, den);
-    return[m, n / g, den / g];
+    return [m, n / g, den / g];
 }
 
 // ゲームエンジン(float)でも確実に認識される「1万分の1」のズレを付与する関数
@@ -292,33 +292,36 @@ function processMC() {
                     continue;
                 }
 
-                // ★変更点：始点ではなく「終点のタイミング」を基準にソートする
-                targetSlides.sort((a, b) => getEndPoint(a) - getEndPoint(b));
-                
+                // ★修正箇所: 「メイン幹」は必ず「始点が一番早いもの」を選ぶ
+                targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
                 const mainSlide = targetSlides[0];
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
+                // メイン以外の枝スライドを取り出し、「終点が早い順」にソートする
+                let branches = targetSlides.slice(1);
+                branches.sort((a, b) => getEndPoint(a) - getEndPoint(b));
+
                 const newSeg =[];
 
-                // 1. メインの元segを保持する
+                // 1. メイン幹の元segをそのまま保持する
                 if (mainSlide.seg) {
                     for (let j = 0; j < mainSlide.seg.length; j++) {
                         newSeg.push(JSON.parse(JSON.stringify(mainSlide.seg[j])));
                     }
                 }
 
-                // 2. 枝スライドの往復ブロック群を追加 (2個以上ある場合のみ)
-                if (targetSlides.length >= 2) {
-                    for (let i = 1; i < targetSlides.length; i++) {
-                        const branch = targetSlides[i];
+                // 2. 枝スライドの往復ブロック群を追加 (枝がある場合のみ)
+                if (branches.length > 0) {
+                    for (let i = 0; i < branches.length; i++) {
+                        const branch = branches[i];
                         const branchSegs = branch.seg ||[];
                         
                         const branchX = (typeof branch.x === 'number') ? branch.x : 0;
                         const offsetX = branchX - mainX;
                         const offsetBeat = beatDiff(branch.beat, mainBeat);
 
-                        // 枝の終点の相対Beatを計算 (ジャンプ元の基準時間)
+                        // 枝の終点の相対Beatを計算 (ジャンプ元・ジャンプ後の基準時間)
                         let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat :[0,0,0];
                         let endRelBeat = beatAdd(offsetBeat, lastSegBeat);
 
@@ -352,18 +355,18 @@ function processMC() {
                     }
                 }
 
-                // 3. 最後に重複バグ修復パトロール
+                // 3. 最後に重複バグ修復パトロール（完全にダブるBeatを1万分の1ずらす）
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
                 // 結合した枝スライドを削除リストへ
-                for (let i = 1; i < targetSlides.length; i++) {
-                    allDeletedNotes.add(targetSlides[i]);
+                for (let i = 0; i < branches.length; i++) {
+                    allDeletedNotes.add(branches[i]);
                 }
                 
                 totalJoinedCount += targetSlides.length;
                 
-                // ログの出し分け（1個のときは修復報告のみ）
+                // ログの出し分け
                 if (targetSlides.length === 1) {
                     let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : " (重複なし)";
                     resultLogs.push(`<span style="color:#17a2b8;">ℹ️ 範囲 ${range.index}: 1個のみ検知されたため、バグ修復のみ実行しました${fixMsg}</span>`);
