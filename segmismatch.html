@@ -35,7 +35,7 @@
 <div class="container">
     <h1>スライド結合ツール</h1>
     <p class="desc">
-        最初のスライドを「メイン幹」とします。<br>
+        終点(一番最後のseg)が一番早いスライドを「メイン幹」とします。<br>
         他の装飾スライドは「幹(x=0) → 終点 → 始点 → 終点 → 幹(x=0)」という往復ブロックに変換されます。(仮)
     </p>
     
@@ -60,7 +60,7 @@
     </div>
 
     <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
-    <button type="button" class="btn-process" onclick="processMC()">結合を実行</button>
+    <button type="button" class="btn-process" onclick="processMC()">🚀 結合を実行</button>
 
     <div id="resultMsg"></div>
     <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
@@ -113,12 +113,22 @@ function beatToPoint(beat) {
     return beat[0] + (beat[1] / beat[2]);
 }
 
+// 【追加】スライドの「終点」のPoint値を計算する関数
+function getEndPoint(note) {
+    let startPoint = beatToPoint(note.beat);
+    if (note.seg && note.seg.length > 0) {
+        let lastSegBeat = note.seg[note.seg.length - 1].beat;
+        return startPoint + beatToPoint(lastSegBeat);
+    }
+    return startPoint;
+}
+
 function parseBeat(str) {
     if (!str) return null;
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
@@ -137,9 +147,9 @@ function beatDiff(beat1, beat2) {
     if (diffNum < 0) diffNum = 0; 
     const m = Math.floor(diffNum / den);
     const n = diffNum % den;
-    if (n === 0) return [m, 0, 0];
+    if (n === 0) return[m, 0, 0];
     const g = gcd(n, den);
-    return [m, n / g, den / g];
+    return[m, n / g, den / g];
 }
 
 function beatAdd(beat1, beat2) {
@@ -172,7 +182,7 @@ function fixDuplicateSegs(segArray) {
         let extraM = Math.floor(newNum / newDen);
         let newM = m + extraM;
         newNum = newNum % newDen;
-        if (newNum === 0) return [newM, 0, 0];
+        if (newNum === 0) return[newM, 0, 0];
         let g = gcd(newNum, newDen);
         return[newM, newNum / g, newDen / g];
     }
@@ -277,13 +287,14 @@ function processMC() {
                     }
                 }
 
-                // ★変更点：1つだけでも作動するように変更
                 if (targetSlides.length < 1) {
                     resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象スライドが見つからないためスキップ</span>`);
                     continue;
                 }
 
-                targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
+                // ★変更点：始点ではなく「終点のタイミング」を基準にソートする
+                targetSlides.sort((a, b) => getEndPoint(a) - getEndPoint(b));
+                
                 const mainSlide = targetSlides[0];
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
@@ -341,7 +352,7 @@ function processMC() {
                     }
                 }
 
-                // 3. 最後に重複バグ修復パトロール（完全にダブるBeatを1万分の1ずらす）
+                // 3. 最後に重複バグ修復パトロール
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
