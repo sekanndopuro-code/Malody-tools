@@ -36,7 +36,8 @@
     <h1>スライド結合ツール</h1>
     <p class="desc">
         始点が一番早いスライドを「メイン幹」とします。<br>
-        幹の軌道をなぞりながら、分岐点に到達した順に枝スライドの往復ブロックを描画する「完全一筆書き」方式で結合します。
+        幹の軌道を一筆書きでなぞりながら枝の往復を描き、<b>一番最後に「幹の終点(最後のseg)」を配置して蓋をします。</b><br>
+        幹の終点タイミングを早めて、一瞬で消滅させる表現にも対応しています。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -162,9 +163,9 @@ function beatAdd(beat1, beat2) {
     let num = num1 + num2;
     let m = m1 + m2 + Math.floor(num / den);
     let n = num % den;
-    if (n === 0) return [m, 0, 0];
+    if (n === 0) return[m, 0, 0];
     const g = gcd(n, den);
-    return [m, n / g, den / g];
+    return[m, n / g, den / g];
 }
 
 // 幹の任意タイミングにおけるX座標を補間で求める
@@ -185,7 +186,7 @@ function getRelXAt(mainPoints, targetPoint) {
     return mainPoints[mainPoints.length - 1].relX;
 }
 
-// 重複バグ修復パトロール (配列の後ろから走査し、幹の終点の判定位置を保つ)
+// 重複バグ修復パトロール (幹の終点の判定位置を死守するため後ろから走査)
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
@@ -322,13 +323,19 @@ function processMC() {
                 }
 
                 let branches = targetSlides.slice(1);
-                
-                // ★ 新ロジック：幹のsegと枝の分岐点を、時間順の「イベント」としてすべて一本道に整理する
                 let events =[];
-
-                // 1. 幹のsegをイベントに登録
-                if (mainSlide.seg) {
-                    for (let s of mainSlide.seg) {
+                
+                // ★ 修正箇所：メイン幹の「最後のseg」を判定の蓋として取り除いておく
+                let mainOriginalSegs = mainSlide.seg ||[];
+                let mainLastSeg = null;
+                
+                if (mainOriginalSegs.length > 0) {
+                    // 最後の要素をフタ用として保持
+                    mainLastSeg = mainOriginalSegs[mainOriginalSegs.length - 1];
+                    
+                    // 最後以外の途中segを、一筆書きのイベントとして登録
+                    for (let i = 0; i < mainOriginalSegs.length - 1; i++) {
+                        let s = mainOriginalSegs[i];
                         events.push({
                             type: 'main_seg',
                             point: beatToPoint(s.beat),
@@ -338,7 +345,7 @@ function processMC() {
                     }
                 }
 
-                // 2. 枝の分岐点(終点タイミング)をイベントに登録
+                // 枝の分岐点(終点タイミング)をイベントに登録
                 if (branches.length > 0) {
                     for (let i = 0; i < branches.length; i++) {
                         const branch = branches[i];
@@ -365,7 +372,7 @@ function processMC() {
                     }
                 }
 
-                // イベントを時間(Point)順にソート。同じ時間なら幹のsegを先に描画する
+                // イベントを時間順にソート (同じ時間なら幹のsegを優先)
                 events.sort((a, b) => {
                     let diff = a.point - b.point;
                     if (Math.abs(diff) > 1e-10) return diff;
@@ -374,16 +381,15 @@ function processMC() {
                     return 0;
                 });
 
-                // イベントを順番になぞって、一筆書きのnewSegを生成する
                 const newSeg =[];
                 
+                // 一筆書きの生成
                 for (let ev of events) {
                     if (ev.type === 'main_seg') {
-                        // 幹の曲がり角
                         newSeg.push({ beat: [...ev.beat], x: ev.x });
                     } else {
-                        // 枝の往復ブロックの挿入
-                        newSeg.push({ beat:[...ev.beat], x: ev.x }); // 分岐点(幹の座標)
+                        // 分岐点(幹の現在座標)
+                        newSeg.push({ beat:[...ev.beat], x: ev.x }); 
 
                         // 復路
                         for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
@@ -400,12 +406,17 @@ function processMC() {
                             newSeg.push({ beat: beatAdd(ev.offsetBeat, s.beat), x: ev.offsetX + s.x });
                         }
 
-                        // 帰還点(幹の座標)
-                        newSeg.push({ beat: [...ev.beat], x: ev.x });
+                        // 帰還点(幹の現在座標)
+                        newSeg.push({ beat:[...ev.beat], x: ev.x }); 
                     }
                 }
 
-                // 最後に重複バグ修復パトロール
+                // ★ 修正箇所：全ての枝を描いた後、最後に「幹の終点(蓋)」を配置する
+                if (mainLastSeg) {
+                    newSeg.push({ beat: [...mainLastSeg.beat], x: mainLastSeg.x });
+                }
+
+                // 最後に重複バグ修復パトロールを実行
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
