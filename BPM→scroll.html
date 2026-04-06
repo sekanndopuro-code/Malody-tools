@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPM to Scroll 変換ツール</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 15px;
+            padding: 10px;
+            box-sizing: border-box;
+            font-family: monospace;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        input[type="number"] {
+            width: 80px;
+            padding: 5px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>BPM → Scroll 変換</h2>
+    
+    <textarea id="inputText" placeholder="ここに元のデータを貼り付けてください..."></textarea>
+    
+    <div class="controls">
+        <label for="baseValue">割る数 (分子):</label>
+        <input type="number" id="baseValue" value="240">
+        <button onclick="convertBPM()">変換する</button>
+    </div>
+
+    <textarea id="outputText" placeholder="ここに変換結果が出力されます..." readonly></textarea>
+</div>
+
+<script>
+    function convertBPM() {
+        const inputText = document.getElementById('inputText').value;
+        const baseValue = parseFloat(document.getElementById('baseValue').value);
+
+        if (isNaN(baseValue)) {
+            alert('割る数には有効な数値を入力してください。');
+            return;
+        }
+
+        // 正規表現で "bpm": 数値 の部分を検索して置換
+        const result = inputText.replace(/"bpm"\s*:\s*([0-9.]+)/g, function(match, bpmStr) {
+            const bpm = parseFloat(bpmStr);
+            
+            // 0除算エラーを防ぐ
+            if (bpm === 0) return `"scroll":0`; 
+            
+            const scroll = baseValue / bpm;
+            
+            // 例に合わせて小数点以下10桁程度で丸める（JavaScriptの計算誤差を防ぐため）
+            // そのまま出力したい場合は return `"scroll":${scroll}`; でもOKです
+            const roundedScroll = Math.round(scroll * 1e10) / 1e10;
+
+            return `"scroll":${roundedScroll}`;
+        });
+
+        document.getElementById('outputText').value = result;
+    }
+</script>
+
+</body>
+</html>
