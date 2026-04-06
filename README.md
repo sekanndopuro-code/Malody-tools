@@ -1,2 +1,2 @@
 # Malody-tools
-Malody-tools.
+(後述)
