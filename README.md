@@ -6,6 +6,6 @@
 https://sekanndopuro-code.github.io/Malody-tools/
 
 
-時系列順に繋げていく方。仕様上装飾スライドは二重になっちゃうけど形は破綻しづらい。
+時系列順に繋げていく方。仕様上装飾スライドは二重になっちゃう
 
 https://sekanndopuro-code.github.io/Malody-tools/segmismatch
