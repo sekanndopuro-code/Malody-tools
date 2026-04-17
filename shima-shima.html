@@ -36,7 +36,7 @@
     <h1>🦓 しましまスライドツール</h1>
     <p class="desc">
         範囲内にあるスライドを「しましま（行って戻って）」に加工します。<br>
-        偶数個目のsegの直後に、1個前のsegを付け足して往復させます。（重複バグ回避の近似化つき）
+        2個目のsegに到達した直後に、<b>「1個前」と「2個目」の2つのsegをセットで付け足す</b>ことで、軌道を綺麗に往復させます。（重複バグ回避の近似化つき）
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -139,9 +139,9 @@ function fixDuplicateSegs(segArray) {
         let extraM = Math.floor(newNum / newDen);
         let newM = m + extraM;
         newNum = newNum % newDen;
-        if (newNum === 0) return [newM, 0, 0];
+        if (newNum === 0) return[newM, 0, 0];
         let g = gcd(newNum, newDen);
-        return [newM, newNum / g, newDen / g];
+        return[newM, newNum / g, newDen / g];
     }
 
     for (let i = 0; i < segArray.length; i++) {
@@ -245,14 +245,16 @@ function processMC() {
                             const newSeg =[];
                             const segs = note.seg;
                             
-                            // ★ しましま化ロジック ★
+                            // ★ 修正版 しましま化ロジック ★
                             for (let j = 0; j < segs.length; j++) {
-                                // まず現在のsegをそのまま追加
+                                // まず現在のsegを追加
                                 newSeg.push(JSON.parse(JSON.stringify(segs[j])));
                                 
-                                // 偶数個目 (j=1, 3, 5...) の直後に、1個前のseg (j-1) を追加して戻る
+                                // 偶数個目 (インデックス j=1, 3, 5...) の直後に、
+                                // 「直前のseg (j-1)」と「偶数個目のseg (j)」を2個追加して折り返す
                                 if ((j + 1) % 2 === 0) {
                                     newSeg.push(JSON.parse(JSON.stringify(segs[j - 1])));
+                                    newSeg.push(JSON.parse(JSON.stringify(segs[j])));
                                 }
                             }
 
