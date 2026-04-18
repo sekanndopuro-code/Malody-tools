@@ -219,7 +219,7 @@ function fixDuplicateSegs(segArray) {
         let extraM = Math.floor(newNum / newDen);
         let newM = m + extraM;
         newNum = newNum % newDen;
-        if (newNum === 0) return [newM, 0, 0];
+        if (newNum === 0) return[newM, 0, 0];
         let g = gcd(newNum, newDen);
         return[newM, newNum / g, newDen / g];
     }
@@ -323,8 +323,9 @@ function processMC() {
                     }
                 }
 
-                if (targetSlides.length < 2) {
-                    resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象が2つ未満のためスキップ</span>`);
+                // ★変更点: 1つ未満(0個)の場合のみスキップするように変更
+                if (targetSlides.length < 1) {
+                    resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象スライドが見つからないためスキップ</span>`);
                     continue;
                 }
 
@@ -378,7 +379,7 @@ function processMC() {
                             }
                             newSeg.push(segItem);
                         }
-                        let zeroItem = { "beat": [...baseBeat], "x": offsetX };
+                        let zeroItem = { "beat":[...baseBeat], "x": offsetX };
                         zeroItem.beat = addOffsetToBeat(zeroItem.beat, i);
                         newSeg.push(zeroItem);
                     }
@@ -393,8 +394,15 @@ function processMC() {
                 }
                 
                 totalJoinedCount += targetSlides.length;
-                let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修正✨)` : "";
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${fixMsg}</span>`);
+                
+                // ★ログの出し分け（1個のときは修復報告のみ）
+                if (targetSlides.length === 1) {
+                    let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : " (重複なし)";
+                    resultLogs.push(`<span style="color:#17a2b8;">ℹ️ 範囲 ${range.index}: 1個のみ検知されたため、バグ修復のみ実行しました${fixMsg}</span>`);
+                } else {
+                    let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : "";
+                    resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${fixMsg}</span>`);
+                }
             }
 
             if (totalJoinedCount === 0) {
