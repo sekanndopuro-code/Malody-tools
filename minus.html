@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マイナス結合ツール</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .desc { font-size: 0.85em; color: #555; margin-top: -10px; margin-bottom: 20px; line-height: 1.4; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        
+        .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; }
+        .btn-add { background: #17a2b8; margin-bottom: 20px; }
+        .btn-add:hover { background: #138496; }
+        .btn-remove { background: #dc3545; padding: 8px 15px; margin-top: 5px; font-size: 0.9em; width: auto; float: right; }
+        .btn-remove:hover { background: #c82333; }
+        .btn-process { background: #9c27b0; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(156, 39, 176, 0.3); }
+        .btn-process:hover { background: #7b1fa2; }
+        
+        .clearfix::after { content: ""; clear: both; display: table; }
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
+        #dlLink:hover { background: #0056b3; }
+        #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>⏪ マイナス結合ツール</h1>
+    <p class="desc">
+        <b>後に出てくるスライドを「基準(0)」</b>とし、先に出ているスライドを<b>「過去(マイナス)への往復ブロック」</b>に変換して結合します。<br>
+        Malody仕様に従い、小節(a)のみをマイナス表記にして逆再生接続を行います。
+    </p>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>📁 .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <div id="rangesContainer">
+        <div class="range-group clearfix" id="range-0">
+            <h4>範囲 1</h4>
+            <div class="form-group">
+                <label>始点Beat (過去の装飾スライドを含む開始位置)</label>
+                <input type="text" class="startBeat" placeholder="例: 1, 0, 1">
+            </div>
+            <div class="form-group">
+                <label>終点Beat</label>
+                <input type="text" class="endBeat" placeholder="例: 10, 0, 0">
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
+        </div>
+    </div>
+
+    <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    <button type="button" class="btn-process" onclick="processMC()">⏪ マイナス結合を実行</button>
+
+    <div id="resultMsg"></div>
+    <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
+</div>
+
+<script>
+let rangeIdCounter = 1;
+
+function addRange() {
+    const container = document.getElementById("rangesContainer");
+    const id = "range-" + rangeIdCounter++;
+    const html = `
+    <div class="range-group clearfix" id="${id}">
+        <h4>範囲指定</h4>
+        <div class="form-group">
+            <label>始点Beat</label>
+            <input type="text" class="startBeat" placeholder="例: 1, 0, 1">
+        </div>
+        <div class="form-group">
+            <label>終点Beat</label>
+            <input type="text" class="endBeat" placeholder="例: 10, 0, 0">
+        </div>
+        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+    </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    updateRangeLabels();
+}
+
+function removeRange(id) {
+    const container = document.getElementById("rangesContainer");
+    if (container.children.length <= 1) {
+        alert("最低でも1つの範囲指定が必要です！");
+        return;
+    }
+    document.getElementById(id).remove();
+    updateRangeLabels();
+}
+
+function updateRangeLabels() {
+    const groups = document.querySelectorAll('.range-group h4');
+    groups.forEach((el, index) => {
+        el.innerText = `範囲 ${index + 1}`;
+    });
+}
+
+function beatToPoint(beat) {
+    if (!beat || beat.length !== 3) return 0;
+    if (beat[2] === 0) return beat[0];
+    // 負の小節もそのまま足し算で処理 (例: -1 + 2/4 = -0.5)
+    return beat[0] + (beat[1] / beat[2]);
+}
+
+function parseBeat(str) {
+    if (!str) return null;
+    str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const parts = str.match(/-?\d+/g);
+    if (parts && parts.length >= 3) {
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    }
+    return null;
+}
+
+function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+
+function beatAdd(beat1, beat2) {
+    if (!beat1) return [...beat2];
+    if (!beat2) return[...beat1];
+    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
+    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    const num1 = n1 * d2;
+    const num2 = n2 * d1;
+    const den = d1 * d2;
+    let num = num1 + num2;
+    let m = m1 + m2 + Math.floor(num / den);
+    let n = num % den;
+    if (n === 0) return [m, 0, 0];
+    const g = gcd(n, den);
+    return [m, n / g, den / g];
+}
+
+// 【NEW】負の相対時間を算出する関数
+// (targetBeat - baseBeat) を計算し、小節のみマイナス、分子分母は必ず正になるように正規化する
+function beatDiffSigned(targetBeat, baseBeat) {
+    const m1 = targetBeat[0], n1 = targetBeat[1] || 0, d1 = targetBeat[2] === 0 ? 1 : (targetBeat[2] || 1);
+    const m2 = baseBeat[0], n2 = baseBeat[1] || 0, d2 = baseBeat[2] === 0 ? 1 : (baseBeat[2] || 1);
+    
+    // 分母を合わせて分子同士で引き算
+    const num1 = (m1 * d1 + n1) * d2;
+    const num2 = (m2 * d2 + n2) * d1;
+    const den = d1 * d2;
+    
+    const diffNum = num1 - num2;
+    
+    // Math.floorは負の数(-0.5 -> -1)にも対応するため、Malodyの変則仕様にピタリとはまる
+    const m = Math.floor(diffNum / den);
+    const n = diffNum - (m * den); // 必ず 0 <= n < den の正の数になる
+    
+    if (n === 0) return [m, 0, 0];
+    const g = gcd(n, den);
+    return [m, n / g, den / g];
+}
+
+// 負のBeatにも対応した、重複バグ修復パトロール (1万分の1ずらし)
+function fixDuplicateSegs(segArray) {
+    let usedPoints =[];
+    let fixedCount = 0;
+    const MICRO_DEN = 10000; 
+    
+    function addMicroOffset(beat, offsetCount) {
+        if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
+        const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : beat[2];
+        
+        // 負の小節も考慮して一度すべて分子に変換
+        const num = (m * d + n) * MICRO_DEN + offsetCount * d;
+        const den = d * MICRO_DEN;
+        
+        // 再び Malody形式（小節のみマイナス）に正規化
+        const newM = Math.floor(num / den);
+        const newN = num - (newM * den);
+        
+        if (newN === 0) return[newM, 0, 0];
+        const g = gcd(newN, den);
+        return[newM, newN / g, den / g];
+    }
+
+    // メインの終点（一番最後）を優先して守るため、配列の後ろから走査
+    for (let i = segArray.length - 1; i >= 0; i--) {
+        let segItem = segArray[i];
+        let p = beatToPoint(segItem.beat);
+        
+        let conflictCount = 0;
+        let currentP = p;
+        
+        while (true) {
+            let isConflict = false;
+            for (let j = 0; j < usedPoints.length; j++) {
+                if (Math.abs(currentP - usedPoints[j]) < 1e-5) {
+                    isConflict = true;
+                    break;
+                }
+            }
+            if (!isConflict) break;
+            
+            conflictCount++;
+            currentP = p + (conflictCount / MICRO_DEN);
+        }
+        
+        if (conflictCount > 0) {
+            segItem.beat = addMicroOffset(segItem.beat, conflictCount);
+            fixedCount++;
+        }
+        usedPoints.push(currentP);
+    }
+    return fixedCount;
+}
+
+function processMC() {
+    const fileInput = document.getElementById("mcFile");
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlLink");
+    
+    msgDiv.innerHTML = "";
+    msgDiv.style.color = "#333";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "ファイルを選択してください。";
+    }
+
+    const rangeGroups = document.querySelectorAll('.range-group');
+    const ranges =[];
+    
+    for (let i = 0; i < rangeGroups.length; i++) {
+        const startStr = rangeGroups[i].querySelector('.startBeat').value;
+        const endStr = rangeGroups[i].querySelector('.endBeat').value;
+        const startBeat = parseBeat(startStr);
+        const endBeat = parseBeat(endStr);
+        
+        if (!startBeat || !endBeat) {
+            msgDiv.style.color = "#d32f2f";
+            return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
+        }
+        
+        const startPoint = beatToPoint(startBeat);
+        const endPoint = beatToPoint(endBeat);
+        ranges.push({
+            index: i + 1,
+            min: Math.min(startPoint, endPoint),
+            max: Math.max(startPoint, endPoint)
+        });
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if (!data.note) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "無効な譜面データです。";
+            }
+
+            const notes = data.note;
+            let allDeletedNotes = new Set();
+            let totalJoinedCount = 0;
+            let resultLogs =[];
+
+            for (let r = 0; r < ranges.length; r++) {
+                const range = ranges[r];
+                const targetSlides =[];
+
+                for (let i = 0; i < notes.length; i++) {
+                    const note = notes[i];
+                    if (allDeletedNotes.has(note)) continue;
+
+                    if (note.seg && Array.isArray(note.seg)) {
+                        const point = beatToPoint(note.beat);
+                        if (point >= range.min - 0.001 && point <= range.max + 0.001) {
+                            targetSlides.push(note);
+                        }
+                    }
+                }
+
+                if (targetSlides.length < 2) {
+                    resultLogs.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象が2つ未満のためスキップ</span>`);
+                    continue;
+                }
+
+                // 始点が早い順（時系列順）にソート
+                targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
+                
+                // 「一番最後に出てくるスライド」を基準(メイン)とする
+                const mainSlide = targetSlides[targetSlides.length - 1];
+                const mainBeat = mainSlide.beat;
+                const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
+
+                // メインより前にある「過去の装飾スライド群」を、メインに近い順(後ろから)に処理
+                let pastBranches = targetSlides.slice(0, -1);
+                pastBranches.reverse(); 
+
+                const newSeg =[];
+
+                // 1. 過去スライドへ向かう「マイナス往復ブロック」の生成
+                for (let i = 0; i < pastBranches.length; i++) {
+                    const branch = pastBranches[i];
+                    const branchSegs = branch.seg ||[];
+                    const branchX = (typeof branch.x === 'number') ? branch.x : 0;
+                    
+                    // 各segの「絶対座標」と「絶対Beat」をリスト化
+                    let absPoints =[ { beat: branch.beat, x: branchX } ];
+                    for (let s of branchSegs) {
+                        absPoints.push({ beat: beatAdd(branch.beat, s.beat), x: branchX + s.x });
+                    }
+
+                    // 復路: 基準点から過去へ遡り、枝スライドの終点から始点へ
+                    for (let j = absPoints.length - 1; j >= 0; j--) {
+                        let p = absPoints[j];
+                        newSeg.push({
+                            beat: beatDiffSigned(p.beat, mainBeat),
+                            x: p.x - mainX
+                        });
+                    }
+
+                    // 往路: 過去の始点から順走して終点へ
+                    for (let j = 1; j < absPoints.length; j++) {
+                        let p = absPoints[j];
+                        newSeg.push({
+                            beat: beatDiffSigned(p.beat, mainBeat),
+                            x: p.x - mainX
+                        });
+                    }
+
+                    // 現在(基準点)へ戻る
+                    newSeg.push({ beat: [0,0,0], x: 0 });
+                }
+
+                // 2. メイン幹の元々のseg(未来への進行)を最後に追加
+                if (mainSlide.seg) {
+                    for (let s of mainSlide.seg) {
+                        newSeg.push(JSON.parse(JSON.stringify(s)));
+                    }
+                }
+
+                // 重複バグ修復パトロール
+                let fixCount = fixDuplicateSegs(newSeg);
+                mainSlide.seg = newSeg;
+                
+                // 過去スライドを削除リストへ
+                for (let i = 0; i < pastBranches.length; i++) {
+                    allDeletedNotes.add(pastBranches[i]);
+                }
+                
+                totalJoinedCount += targetSlides.length;
+                let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : "";
+                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個をマイナス結合しました${fixMsg}</span>`);
+            }
+
+            if (totalJoinedCount === 0) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "指定された範囲内に結合可能なスライドが一つも見つかりませんでした。";
+            }
+
+            data.note = notes.filter(n => !allDeletedNotes.has(n));
+
+            const outJson = JSON.stringify(data); 
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            
+            dlLink.href = url;
+            let originalName = file.name;
+            let dotIndex = originalName.lastIndexOf('.');
+            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
+            dlLink.download = originalName + "_minus_joined.mc";
+            
+            dlLink.style.display = "block";
+            
+            msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = "ファイルの解析に失敗しました。";
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
+
+</body>
+</html>
