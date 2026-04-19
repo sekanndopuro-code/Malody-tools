@@ -40,8 +40,8 @@
 <div class="container">
     <h1>🦓 しましまスライドツール</h1>
     <p class="desc">
-        範囲内にあるスライドを「しましま（行って戻って）」に加工します。<br>
-        指定したタイミングで軌道を往復させ、自動的に微小ずらしを適用して重複バグを回避します。
+        範囲内にあるスライドを指定したタイミングで往復させます。<br>
+        自動的に微小ずらしを適用して重複バグを回避します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -58,6 +58,10 @@
         <label>
             <input type="radio" name="stripeMode" value="odd"> <b>奇数番目で折り返す (1個目、3個目...)</b>
             <span class="radio-desc">奇数個目のsegの直後に、1個前のsegを付け足して往復します。<br>（1個目の場合は、スライドの始点へ戻って往復します）</span>
+        </label>
+        <label>
+            <input type="radio" name="stripeMode" value="all"> <b>すべてで折り返す (毎seg折り返し)</b>
+            <span class="radio-desc" style="color: #d32f2f; font-weight: bold;">※注意：この場合しましまにはなりません。二次的に装飾を作りたい時のみ使ってください。</span>
         </label>
     </div>
 
@@ -260,7 +264,7 @@ function processMC() {
                             const newSeg =[];
                             const segs = note.seg;
                             
-                            // ★ しましま化ロジック (偶数/奇数 切り替え) ★
+                            // ★ しましま化ロジック ★
                             for (let j = 0; j < segs.length; j++) {
                                 // まず現在のsegをそのまま追加
                                 newSeg.push(JSON.parse(JSON.stringify(segs[j])));
@@ -275,14 +279,20 @@ function processMC() {
                                     // 奇数個目 (インデックス j=0, 2, 4...) の直後に往復ブロックを追加
                                     if ((j + 1) % 2 !== 0) {
                                         if (j === 0) {
-                                            // 1番目の場合は、スライドの始点へ戻る (beat: 0,0,1, x: 0)
                                             newSeg.push({ beat:[0, 0, 1], x: 0 });
                                         } else {
-                                            // 3番目以降は1個前(j-1)に戻る
                                             newSeg.push(JSON.parse(JSON.stringify(segs[j - 1])));
                                         }
                                         newSeg.push(JSON.parse(JSON.stringify(segs[j])));
                                     }
+                                } else if (stripeMode === "all") {
+                                    // 【NEW】すべてのsegで折り返しを追加
+                                    if (j === 0) {
+                                        newSeg.push({ beat:[0, 0, 1], x: 0 });
+                                    } else {
+                                        newSeg.push(JSON.parse(JSON.stringify(segs[j - 1])));
+                                    }
+                                    newSeg.push(JSON.parse(JSON.stringify(segs[j])));
                                 }
                             }
 
@@ -300,7 +310,7 @@ function processMC() {
                 }
 
                 if (countInRange > 0) {
-                    resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${countInRange}個 のスライドをしましまにしました！</span>`);
+                    resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${countInRange}個 のスライドを加工しました！</span>`);
                 } else {
                     resultLogs.push(`<span style="color:#17a2b8;">ℹ️ 範囲 ${range.index}: 対象スライドが見つかりませんでした</span>`);
                 }
