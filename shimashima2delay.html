@@ -14,10 +14,18 @@
         input[type="text"], input[type="file"], input[type="number"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
         .note { font-size: 0.8em; color: #666; margin-top: 5px; display: block; line-height: 1.4; }
         
+        .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        
         button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
+        .btn-add { background: #17a2b8; margin-bottom: 20px; }
+        .btn-add:hover { background: #138496; }
+        .btn-remove { background: #dc3545; padding: 8px 15px; margin-top: 5px; font-size: 0.9em; width: auto; float: right; }
+        .btn-remove:hover { background: #c82333; }
         .btn-process { background: #e91e63; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(233, 30, 99, 0.3); }
         .btn-process:hover { background: #c2185b; }
         
+        .clearfix::after { content: ""; clear: both; display: table; }
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
@@ -30,7 +38,8 @@
 <div class="container">
     <h1>🦓 しましまtoDelay敷</h1>
     <p class="desc">
-        譜面内の「逆走(しましま)スライド」を自動検知し、<b>Delayエフェクトによる巻き戻し</b>を使った正規の表現に変換（展開）します。<br>
+        選択範囲内の「逆走(しましま)スライド」を検知し、<b>Delayエフェクトによる巻き戻し</b>を使った表現に変換（展開）します。<br>
+        ※ <a href="https://sekanndopuro-code.github.io/Malody-tools/shima-shima.html" target="_blank">しましまスライドツール</a> で先にスライドをしましまにしてから使う想定です。<br>
         1/288の近似化、ミリ秒計算、後続ノーツの音ズレ補正をすべて自動で行います。
     </p>
     
@@ -39,19 +48,75 @@
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
-    <div class="form-group" style="background: #fff0f5; padding: 15px; border-radius: 8px; border: 1px solid #f8bbd0;">
+    <div class="form-group" style="background: #fff0f5; padding: 15px; border-radius: 8px; border: 1px solid #f8bbd0; margin-bottom: 20px;">
         <label style="color: #c2185b;">⏱️ 基準BPM</label>
         <input type="number" id="baseBpm" value="160" step="0.1">
         <span class="note">譜面の <code>time</code> 配列からBPMを自動取得して計算しますが、万が一取得できなかった場合はこのBPMを基準にDelay値を算出します。</span>
     </div>
 
-    <button type="button" class="btn-process" onclick="processMC()">✨ Delay敷きに変換する</button>
+    <div id="rangesContainer">
+        <div class="range-group clearfix" id="range-0">
+            <h4>範囲 1</h4>
+            <div class="form-group">
+                <label>始点Beat</label>
+                <input type="text" class="startBeat" placeholder="例: 22, 0, 1">
+            </div>
+            <div class="form-group">
+                <label>終点Beat</label>
+                <input type="text" class="endBeat" placeholder="例: 25, 0, 0">
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
+        </div>
+    </div>
+
+    <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    <button type="button" class="btn-process" onclick="processMC()">✨ Delay敷に変換する</button>
 
     <div id="resultMsg"></div>
     <a id="dlLink" href="#">💾 変換済みファイルをダウンロード</a>
 </div>
 
 <script>
+let rangeIdCounter = 1;
+
+function addRange() {
+    const container = document.getElementById("rangesContainer");
+    const id = "range-" + rangeIdCounter++;
+    const html = `
+    <div class="range-group clearfix" id="${id}">
+        <h4>範囲指定</h4>
+        <div class="form-group">
+            <label>始点Beat</label>
+            <input type="text" class="startBeat" placeholder="例: 22, 0, 1">
+        </div>
+        <div class="form-group">
+            <label>終点Beat</label>
+            <input type="text" class="endBeat" placeholder="例: 25, 0, 0">
+        </div>
+        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+    </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    updateRangeLabels();
+}
+
+function removeRange(id) {
+    const container = document.getElementById("rangesContainer");
+    if (container.children.length <= 1) {
+        alert("最低でも1つの範囲指定が必要です！");
+        return;
+    }
+    document.getElementById(id).remove();
+    updateRangeLabels();
+}
+
+function updateRangeLabels() {
+    const groups = document.querySelectorAll('.range-group h4');
+    groups.forEach((el, index) => {
+        el.innerText = `範囲 ${index + 1}`;
+    });
+}
+
 function safeBeat(beat) {
     if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
     return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
@@ -60,6 +125,16 @@ function safeBeat(beat) {
 function beatToPoint(beat) {
     let b = safeBeat(beat);
     return b[0] + (b[1] / b[2]);
+}
+
+function parseBeat(str) {
+    if (!str) return null;
+    str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const parts = str.match(/-?\d+/g);
+    if (parts && parts.length >= 3) {
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    }
+    return null;
 }
 
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
@@ -94,7 +169,6 @@ function beatSub(beat1, beat2) {
     return [m, n / g, den / g];
 }
 
-// 1/32などの近似ズレを除去し、本来のグリッド(192分音符)にスナップする
 function snapToBeat(point) {
     if (isNaN(point)) return[0, 0, 1];
     let m = Math.floor(point + 1e-6);
@@ -135,6 +209,28 @@ function processMC() {
         return msgDiv.innerHTML = "ファイルを選択してください。";
     }
 
+    const rangeGroups = document.querySelectorAll('.range-group');
+    const ranges =[];
+    
+    for (let i = 0; i < rangeGroups.length; i++) {
+        const startStr = rangeGroups[i].querySelector('.startBeat').value;
+        const endStr = rangeGroups[i].querySelector('.endBeat').value;
+        const startBeat = parseBeat(startStr);
+        const endBeat = parseBeat(endStr);
+        
+        if (!startBeat || !endBeat) {
+            msgDiv.style.color = "#d32f2f";
+            return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
+        }
+        
+        const startPoint = beatToPoint(startBeat);
+        const endPoint = beatToPoint(endBeat);
+        ranges.push({
+            min: Math.min(startPoint, endPoint),
+            max: Math.max(startPoint, endPoint)
+        });
+    }
+
     const file = fileInput.files[0];
     const reader = new FileReader();
     
@@ -155,13 +251,29 @@ function processMC() {
             const origTimeEvents = JSON.parse(JSON.stringify(data.time)); // BPM参照用
             let logTexts =[];
             
+            // 指定された範囲内にあるスライドを特定する
+            let targetNotes = new Set();
+            for (let i = 0; i < notes.length; i++) {
+                const note = notes[i];
+                if (note && note.beat) {
+                    const point = beatToPoint(safeBeat(note.beat));
+                    for (let r of ranges) {
+                        if (point >= r.min - 0.001 && point <= r.max + 0.001) {
+                            targetNotes.add(note);
+                            break;
+                        }
+                    }
+                }
+            }
+
             // ========================================================
-            // 1. 全スライドから「逆行」を検知し、巻き戻りイベントを抽出
+            // 1. 対象スライドから「逆行」を検知し、巻き戻りイベントを抽出
             // ========================================================
-            let globalTriggers =[];
+            let rawTriggers =[];
             
             for (let note of notes) {
-                if (note && note.beat && note.seg && Array.isArray(note.seg)) {
+                // targetNotesに含まれるスライドのみ展開とDelayのトリガーとする
+                if (targetNotes.has(note) && note.seg && Array.isArray(note.seg)) {
                     let cleanSegs = note.seg.map(s => ({ origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))) }));
                     
                     for (let i = 1; i < cleanSegs.length; i++) {
@@ -174,7 +286,7 @@ function processMC() {
                             // 逆行が発動する絶対時間 (スライド始点 + 直前segの本来の時間)
                             let origAbsBeat = beatAdd(safeBeat(note.beat), cleanSegs[i-1].origBeat); 
                             
-                            globalTriggers.push({
+                            rawTriggers.push({
                                 origAbsBeat: origAbsBeat,
                                 origAbsPoint: beatToPoint(origAbsBeat),
                                 diffBeat: diffBeat,
@@ -186,15 +298,15 @@ function processMC() {
                 }
             }
 
-            if (globalTriggers.length === 0) {
+            if (rawTriggers.length === 0) {
                 msgDiv.style.color = "#17a2b8";
-                return msgDiv.innerHTML = "譜面内に逆走(しましま)スライドが見つかりませんでした。";
+                return msgDiv.innerHTML = "指定範囲内に逆走(しましま)スライドが見つかりませんでした。";
             }
 
             // 同時刻の逆行イベントをまとめる（複数スライドが同時に折り返す場合）
-            globalTriggers.sort((a, b) => a.origAbsPoint - b.origAbsPoint);
+            rawTriggers.sort((a, b) => a.origAbsPoint - b.origAbsPoint);
             let uniqueTriggers =[];
-            for (let trig of globalTriggers) {
+            for (let trig of rawTriggers) {
                 if (uniqueTriggers.length === 0 || trig.origAbsPoint > uniqueTriggers[uniqueTriggers.length - 1].origAbsPoint + 1e-4) {
                     uniqueTriggers.push(trig);
                 } else {
@@ -206,7 +318,7 @@ function processMC() {
                 }
             }
             
-            logTexts.push(`📌 逆走箇所を ${uniqueTriggers.length} 箇所検知しました。`);
+            logTexts.push(`📌 範囲内で逆走箇所を ${uniqueTriggers.length} 箇所検知しました。`);
 
             // 任意の絶対時間(origAbsPoint)より「前」に発動した逆行量の合計を返す
             function getGlobalShift(origAbsPoint) {
@@ -221,10 +333,10 @@ function processMC() {
             }
 
             // ★ MalodyのDelay仕様に合わせた1/288の近似化
-            const EPSILON =[0, 1, 288]; 
+            const EPSILON = [0, 1, 288]; 
 
             // ========================================================
-            // 2. スライドの展開（広げる処理）とノーツ全体の音ズレ補正
+            // 2. 全てのノーツの配置時間を未来へずらし、音ズレを補正する
             // ========================================================
             for (let note of notes) {
                 if (!note || !note.beat) continue;
@@ -236,7 +348,8 @@ function processMC() {
                 let localAccum = getGlobalShift(origNotePoint - 1e-4); 
                 note.beat = beatAdd(origNoteBeat, localAccum);
 
-                if (note.seg && Array.isArray(note.seg)) {
+                // 対象スライド（範囲内）のみsegの展開を行う。それ以外は形を保つ。
+                if (targetNotes.has(note) && note.seg && Array.isArray(note.seg)) {
                     let cleanSegs = note.seg.map(s => ({ 
                         origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))), 
                         x: (typeof s.x === 'number') ? s.x : 0 
@@ -304,7 +417,7 @@ function processMC() {
                     delay: exactDelay
                 });
                 
-                logTexts.push(`⏱️ 展開位置[${delayAbsBeat.join(",")}] に Delay ${exactDelay} を追加しました`);
+                logTexts.push(`⏱️ 展開位置[${delayAbsBeat.join(",")}] に Delay ${exactDelay} を追加`);
             }
 
             // 全てのtimeイベントを時間順にソート
