@@ -30,7 +30,7 @@
     <h1>🦓 しましまtoDelay敷</h1>
     <p class="desc">
         譜面内の「逆走(しましま)スライド」を自動検知し、<b>Delayエフェクトによる巻き戻し</b>を使った正規の表現に変換（展開）します。<br>
-        1/9999の近似化、ミリ秒計算、後続ノーツの音ズレ補正をすべて自動で行います。
+        ミリ秒計算、後続ノーツの音ズレ補正をすべて自動で行います。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -44,7 +44,7 @@
         <span class="note">譜面の <b>time</b> 配列からBPMを自動取得して計算しますが、取得できなかった場合はこのBPMを基準にミリ秒を算出します。</span>
     </div>
 
-    <button type="button" class="btn-process" onclick="processMC()">✨ Delay敷きに変換する</button>
+    <button type="button" class="btn-process" onclick="processMC()">変換する</button>
 
     <div id="resultMsg"></div>
     <a id="dlLink" href="#">💾 変換済みファイルをダウンロード</a>
