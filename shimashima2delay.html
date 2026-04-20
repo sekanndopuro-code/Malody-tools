@@ -31,7 +31,7 @@
     <h1>🦓 しましまtoDelay敷</h1>
     <p class="desc">
         譜面内の「逆走(しましま)スライド」を自動検知し、<b>Delayエフェクトによる巻き戻し</b>を使った正規の表現に変換（展開）します。<br>
-        Malody特有のDelay値の仕様に完全準拠し、15桁精度の計算と後続ノーツの音ズレ補正をすべて自動で行います。
+        1/9999の近似化、ミリ秒計算、後続ノーツの音ズレ補正をすべて自動で行います。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -52,12 +52,13 @@
 </div>
 
 <script>
-// 安全にBeat配列を取得する（undefinedや不正な形式を防止）
+// 安全にBeat配列を取得する
 function safeBeat(beat) {
-    if (!beat || !Array.isArray(beat) || beat.length < 3) return[0, 0, 1];
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
     return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
 }
 
+// Beatを「拍(Point)」に変換
 function beatToPoint(beat) {
     let b = safeBeat(beat);
     return b[0] + (b[1] / b[2]);
@@ -95,16 +96,17 @@ function beatSub(beat1, beat2) {
     return [m, n / g, den / g];
 }
 
+// 1/32などの近似ズレを除去し、本来のグリッド(192分音符)にスナップする
 function snapToBeat(point) {
     if (isNaN(point)) return [0, 0, 1];
     let m = Math.floor(point + 1e-6);
     let frac = point - m;
     let den = 192;
     let num = Math.round(frac * den);
-    if (num === 0) return[m, 0, 0];
+    if (num === 0) return [m, 0, 0];
     if (num === den) return[m + 1, 0, 0];
     let g = gcd(num, den);
-    return[m, num / g, den / g];
+    return [m, num / g, den / g];
 }
 
 function getBpmAt(point, timeArray, defaultBpm) {
@@ -140,7 +142,6 @@ function processMC() {
     
     reader.onload = function(e) {
         try {
-            // BOM(見えない特殊文字)が含まれている場合は除去してパース
             let rawStr = e.target.result;
             let cleanStr = rawStr.replace(/^\uFEFF/, '').trim();
             const data = JSON.parse(cleanStr);
@@ -149,33 +150,31 @@ function processMC() {
                 throw new Error("譜面データに note 配列が存在しません。");
             }
             if (!data.time || !Array.isArray(data.time)) {
-                data.time =[]; // timeが無くてもエラーにしない
+                data.time =[]; 
             }
 
             const notes = data.note;
-            const origTimeEvents = JSON.parse(JSON.stringify(data.time));
+            const origTimeEvents = JSON.parse(JSON.stringify(data.time)); // BPM参照用
             let logTexts =[];
             
+            // ========================================================
             // 1. 全スライドから「逆行」を検知し、巻き戻りイベントを抽出
+            // ========================================================
             let globalTriggers =[];
             
             for (let note of notes) {
-                // seg配列を持つスライドノーツのみ処理
                 if (note && note.beat && note.seg && Array.isArray(note.seg)) {
-                    // 安全なbeatオブジェクトのリストを作成
-                    let cleanSegs = note.seg.map(s => ({ 
-                        origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))), 
-                        x: (typeof s.x === 'number') ? s.x : 0 
-                    }));
+                    let cleanSegs = note.seg.map(s => ({ origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))) }));
                     
                     for (let i = 1; i < cleanSegs.length; i++) {
-                        let prev = cleanSegs[i-1];
-                        let curr = cleanSegs[i];
+                        let prevPoint = beatToPoint(cleanSegs[i-1].origBeat);
+                        let currPoint = beatToPoint(cleanSegs[i].origBeat);
                         
                         // 直前より時間が戻っているか？(微小ズレは無視して判定)
-                        if (beatToPoint(curr.origBeat) < beatToPoint(prev.origBeat) - 1e-4) {
-                            let diffBeat = beatSub(prev.origBeat, curr.origBeat);
-                            let origAbsBeat = beatAdd(safeBeat(note.beat), prev.origBeat); // 逆行が発動する絶対時間
+                        if (currPoint < prevPoint - 1e-4) {
+                            let diffBeat = beatSub(cleanSegs[i-1].origBeat, cleanSegs[i].origBeat);
+                            // 逆行が発動する絶対時間 (スライド始点 + 直前segの本来の時間)
+                            let origAbsBeat = beatAdd(safeBeat(note.beat), cleanSegs[i-1].origBeat); 
                             
                             globalTriggers.push({
                                 origAbsBeat: origAbsBeat,
@@ -194,7 +193,7 @@ function processMC() {
                 return msgDiv.innerHTML = "譜面内に逆走(しましま)スライドが見つかりませんでした。";
             }
 
-            // 同時刻の逆行イベントをまとめる
+            // 同時刻の逆行イベントをまとめる（複数スライドが同時に折り返す場合）
             globalTriggers.sort((a, b) => a.origAbsPoint - b.origAbsPoint);
             let uniqueTriggers =[];
             for (let trig of globalTriggers) {
@@ -202,92 +201,103 @@ function processMC() {
                     uniqueTriggers.push(trig);
                 } else {
                     let last = uniqueTriggers[uniqueTriggers.length - 1];
+                    // 同時刻なら、最も大きく戻るものを採用
                     if (beatToPoint(trig.diffBeat) > beatToPoint(last.diffBeat)) {
-                        last.diffBeat = trig.diffBeat; // より大きく戻る方を採用
+                        last.diffBeat = trig.diffBeat; 
                     }
                 }
             }
             
             logTexts.push(`📌 逆走箇所を ${uniqueTriggers.length} 箇所検知しました。`);
 
+            // 任意の絶対時間(origAbsPoint)より「前」に発動した逆行量の合計を返す
             function getGlobalShift(origAbsPoint) {
-                let shift = [0,0,0];
+                let shift = [0, 0, 0];
                 for (let trig of uniqueTriggers) {
-                    if (origAbsPoint >= trig.origAbsPoint - 1e-4) {
+                    // そのトリガー発動時間より厳密に未来であればズラす
+                    if (origAbsPoint > trig.origAbsPoint + 1e-4) {
                         shift = beatAdd(shift, trig.diffBeat);
                     }
                 }
                 return shift;
             }
 
-            const EPSILON = [0, 1, 9999]; // 1/9999の近似化 (被り回避用)
+            const EPSILON =[0, 1, 9999]; // ワープ回避のための 1/9999 近似化
 
-            // 2. 全てのノーツの配置時間を未来へずらし、音ズレを補正する
+            // ========================================================
+            // 2. スライドの展開（広げる処理）とノーツ全体の音ズレ補正
+            // ========================================================
             for (let note of notes) {
-                if (!note || !note.beat) continue; // beatが無い特殊ノーツは無視
+                if (!note || !note.beat) continue;
                 
-                let origNotePoint = beatToPoint(safeBeat(note.beat));
-                let noteShift = getGlobalShift(origNotePoint - 1e-4); 
+                let origNoteBeat = safeBeat(note.beat);
+                let origNotePoint = beatToPoint(origNoteBeat);
                 
-                note.beat = beatAdd(safeBeat(note.beat), noteShift);
+                // スライド始点のシフト量 (始点より前に発生した逆行量)
+                let localAccum = getGlobalShift(origNotePoint - 1e-4); 
+                note.beat = beatAdd(origNoteBeat, localAccum);
 
                 if (note.seg && Array.isArray(note.seg)) {
                     let cleanSegs = note.seg.map(s => ({ 
                         origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))), 
                         x: (typeof s.x === 'number') ? s.x : 0 
                     }));
-                    let newSeg =[];
+                    
+                    let newSegs =[];
+                    let prevOrigPoint = 0;
                     
                     for (let i = 0; i < cleanSegs.length; i++) {
-                        let currOrigAbsBeat = beatAdd(safeBeat([Math.floor(origNotePoint), 0, 1]), cleanSegs[i].origBeat); 
-                        let currOrigAbsPoint = beatToPoint(currOrigAbsBeat);
+                        let currOrigBeat = cleanSegs[i].origBeat;
+                        let currOrigPoint = beatToPoint(currOrigBeat);
                         
-                        let segShift = getGlobalShift(currOrigAbsPoint);
-                        let newAbsBeat = beatAdd(currOrigAbsBeat, segShift);
-                        
-                        let segItem = { beat: beatSub(newAbsBeat, safeBeat(note.beat)), x: cleanSegs[i].x };
-                        
-                        // ワープ回避：逆走する直前のsegを 1/9999 手前に近似化する
-                        let isTriggerPoint = false;
-                        for (let trig of globalTriggers) {
-                            if (trig.slideRef === note && trig.segIndex === i + 1) {
-                                isTriggerPoint = true;
-                            }
-                        }
-                        if (isTriggerPoint) {
-                            segItem.beat = beatSub(safeBeat(segItem.beat), EPSILON);
+                        if (i > 0 && currOrigPoint < prevOrigPoint - 1e-4) {
+                            // 逆行発生！
+                            let diffBeat = beatSub(cleanSegs[i-1].origBeat, currOrigBeat);
+                            // 逆行した分だけ、これ以降の配置Beatを未来へ押し出す
+                            localAccum = beatAdd(localAccum, diffBeat);
+                            
+                            // ワープを防ぐため、直前のsegを 1/9999 手前に近似化する
+                            let lastSeg = newSegs[newSegs.length - 1];
+                            lastSeg.beat = beatSub(safeBeat(lastSeg.beat), EPSILON);
                         }
                         
-                        newSeg.push(segItem);
+                        // 広げられた後の論理的絶対時間を計算
+                        let logicalAbsBeat = beatAdd(beatAdd(origNoteBeat, currOrigBeat), localAccum);
+                        // スライド始点との差分を新しいseg.beatにする
+                        newSegs.push({ beat: beatSub(logicalAbsBeat, safeBeat(note.beat)), x: cleanSegs[i].x });
+                        
+                        prevOrigPoint = currOrigPoint;
                     }
-                    note.seg = newSeg;
+                    note.seg = newSegs;
                 }
             }
 
-            // 3. timeイベントの補正と、delayイベントの追加
+            // ========================================================
+            // 3. timeイベントの補正と、Delayイベントの配置
+            // ========================================================
             let newTimeEvents =[];
             
             for (let ev of data.time) {
                 if (!ev || !ev.beat) continue;
                 let p = beatToPoint(safeBeat(ev.beat));
-                ev.beat = beatAdd(safeBeat(ev.beat), getGlobalShift(p));
+                ev.beat = beatAdd(safeBeat(ev.beat), getGlobalShift(p - 1e-4));
                 newTimeEvents.push(ev);
             }
 
-            for (let b of uniqueTriggers) {
-                let bpm = getBpmAt(b.origAbsPoint, origTimeEvents, baseBpmInput);
-                if (bpm <= 0) bpm = 160; // ゼロ割防止
+            for (let trig of uniqueTriggers) {
+                let bpm = getBpmAt(trig.origAbsPoint, origTimeEvents, baseBpmInput);
+                if (bpm <= 0) bpm = 160; 
                 
-                // ★ Malody専用のDelay値計算 ★
-                // (実際のミリ秒ではなく「小節数 × 1拍のミリ秒」になる仕様)
-                let diffPoint = beatToPoint(b.diffBeat);
+                // ★ Malody専用の正しいDelay値計算 ★
+                // (ずれる拍数) × (1拍のミリ秒 = 60000 / BPM)
+                let diffPoint = beatToPoint(trig.diffBeat);
                 let delayValue = - (diffPoint * (60000 / bpm));
                 
-                // 有効数字15桁で正確に指定
                 let exactDelay = parseFloat(delayValue.toPrecision(15));
                 
-                let shiftBefore = getGlobalShift(b.origAbsPoint);
-                let delayAbsBeat = beatAdd(b.origAbsBeat, shiftBefore);
+                // Delayを発動させる絶対時間 (展開後の時間)
+                let shiftBefore = getGlobalShift(trig.origAbsPoint - 1e-4);
+                let delayAbsBeat = beatAdd(trig.origAbsBeat, shiftBefore);
                 
                 newTimeEvents.push({
                     beat: delayAbsBeat,
@@ -295,9 +305,10 @@ function processMC() {
                     delay: exactDelay
                 });
                 
-                logTexts.push(`⏱️ 展開位置 [${delayAbsBeat.join(",")}] に Delay ${exactDelay} を追加しました`);
+                logTexts.push(`⏱️ 展開位置[${delayAbsBeat.join(",")}] に Delay ${exactDelay} を追加しました`);
             }
 
+            // 全てのtimeイベントを時間順にソート
             newTimeEvents.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
             data.time = newTimeEvents;
 
@@ -314,15 +325,14 @@ function processMC() {
             dlLink.style.display = "block";
             
             msgDiv.style.color = "#c2185b";
-            msgDiv.innerHTML = `<b>🎉 変換完了！完璧なDelay計算と音ズレ補正を行いました！</b><br>
+            msgDiv.innerHTML = `<b>🎉 変換完了！完璧な展開とDelay計算を行いました！</b><br>
             <div class="log-box">${logTexts.join("<br>")}</div>`;
 
         } catch (err) {
             console.error(err);
             msgDiv.style.color = "#d32f2f";
             msgDiv.innerHTML = `<b>ファイルの解析に失敗しました。</b><br>
-            <div class="log-box error-log">エラー詳細：<br>${err.message}<br><br>${err.stack}</div>
-            <span class="note">※もしよろしければ、この赤枠のエラー文を教えていただけるとすぐに修正できます！</span>`;
+            <div class="log-box error-log">エラー詳細：<br>${err.message}<br><br>${err.stack}</div>`;
         }
     };
     reader.readAsText(file);
