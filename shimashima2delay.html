@@ -31,7 +31,7 @@
     <h1>🦓 しましまtoDelay敷</h1>
     <p class="desc">
         譜面内の「逆走(しましま)スライド」を自動検知し、<b>Delayエフェクトによる巻き戻し</b>を使った正規の表現に変換（展開）します。<br>
-        1/9999の近似化、ミリ秒計算、後続ノーツの音ズレ補正をすべて自動で行います。
+        1/288の近似化、ミリ秒計算、後続ノーツの音ズレ補正をすべて自動で行います。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -52,13 +52,11 @@
 </div>
 
 <script>
-// 安全にBeat配列を取得する
 function safeBeat(beat) {
     if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
     return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
 }
 
-// Beatを「拍(Point)」に変換
 function beatToPoint(beat) {
     let b = safeBeat(beat);
     return b[0] + (b[1] / b[2]);
@@ -98,15 +96,15 @@ function beatSub(beat1, beat2) {
 
 // 1/32などの近似ズレを除去し、本来のグリッド(192分音符)にスナップする
 function snapToBeat(point) {
-    if (isNaN(point)) return [0, 0, 1];
+    if (isNaN(point)) return[0, 0, 1];
     let m = Math.floor(point + 1e-6);
     let frac = point - m;
     let den = 192;
     let num = Math.round(frac * den);
-    if (num === 0) return [m, 0, 0];
+    if (num === 0) return[m, 0, 0];
     if (num === den) return[m + 1, 0, 0];
     let g = gcd(num, den);
-    return [m, num / g, den / g];
+    return[m, num / g, den / g];
 }
 
 function getBpmAt(point, timeArray, defaultBpm) {
@@ -222,7 +220,8 @@ function processMC() {
                 return shift;
             }
 
-            const EPSILON =[0, 1, 9999]; // ワープ回避のための 1/9999 近似化
+            // ★ MalodyのDelay仕様に合わせた1/288の近似化
+            const EPSILON =[0, 1, 288]; 
 
             // ========================================================
             // 2. スライドの展開（広げる処理）とノーツ全体の音ズレ補正
@@ -256,7 +255,7 @@ function processMC() {
                             // 逆行した分だけ、これ以降の配置Beatを未来へ押し出す
                             localAccum = beatAdd(localAccum, diffBeat);
                             
-                            // ワープを防ぐため、直前のsegを 1/9999 手前に近似化する
+                            // ワープを防ぐため、直前のsegを 1/288 手前に近似化する
                             let lastSeg = newSegs[newSegs.length - 1];
                             lastSeg.beat = beatSub(safeBeat(lastSeg.beat), EPSILON);
                         }
