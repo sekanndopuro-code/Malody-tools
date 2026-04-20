@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -22,6 +22,7 @@
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
         .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
+        .error-log { color: #d32f2f; background: #ffebee; border-color: #f5c6cb; }
     </style>
 </head>
 <body>
@@ -51,19 +52,23 @@
 </div>
 
 <script>
+// 安全にBeat配列を取得する（undefinedや不正な形式を防止）
+function safeBeat(beat) {
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return[0, 0, 1];
+    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
+}
+
 function beatToPoint(beat) {
-    if (!beat || beat.length !== 3) return 0;
-    if (beat[2] === 0) return beat[0];
-    return beat[0] + (beat[1] / beat[2]);
+    let b = safeBeat(beat);
+    return b[0] + (b[1] / b[2]);
 }
 
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function beatAdd(beat1, beat2) {
-    if (!beat1) return [...beat2];
-    if (!beat2) return[...beat1];
-    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
-    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    let b1 = safeBeat(beat1), b2 = safeBeat(beat2);
+    const m1 = b1[0], n1 = b1[1], d1 = b1[2];
+    const m2 = b2[0], n2 = b2[1], d2 = b2[2];
     const num1 = n1 * d2;
     const num2 = n2 * d1;
     const den = d1 * d2;
@@ -76,37 +81,39 @@ function beatAdd(beat1, beat2) {
 }
 
 function beatSub(beat1, beat2) {
-    if (!beat1) return[0, 0, 0];
-    if (!beat2) return [...beat1];
-    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
-    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    let b1 = safeBeat(beat1), b2 = safeBeat(beat2);
+    const m1 = b1[0], n1 = b1[1], d1 = b1[2];
+    const m2 = b2[0], n2 = b2[1], d2 = b2[2];
     const num1 = (m1 * d1 + n1) * d2;
     const num2 = (m2 * d2 + n2) * d1;
     const den = d1 * d2;
     let diffNum = num1 - num2;
     const m = Math.floor(diffNum / den);
     const n = diffNum - (m * den);
-    if (n === 0) return[m, 0, 0];
+    if (n === 0) return [m, 0, 0];
     const g = gcd(Math.abs(n), den);
-    return[m, n / g, den / g];
+    return [m, n / g, den / g];
 }
 
 function snapToBeat(point) {
+    if (isNaN(point)) return [0, 0, 1];
     let m = Math.floor(point + 1e-6);
     let frac = point - m;
     let den = 192;
     let num = Math.round(frac * den);
     if (num === 0) return[m, 0, 0];
-    if (num === den) return [m + 1, 0, 0];
+    if (num === den) return[m + 1, 0, 0];
     let g = gcd(num, den);
     return[m, num / g, den / g];
 }
 
 function getBpmAt(point, timeArray, defaultBpm) {
-    let bpm = defaultBpm;
-    for (let ev of timeArray) {
-        if (beatToPoint(ev.beat) <= point + 1e-5) {
-            if (ev.bpm) bpm = ev.bpm;
+    let bpm = defaultBpm || 160;
+    if (Array.isArray(timeArray)) {
+        for (let ev of timeArray) {
+            if (ev && ev.beat && beatToPoint(ev.beat) <= point + 1e-5) {
+                if (ev.bpm) bpm = ev.bpm;
+            }
         }
     }
     return bpm;
@@ -114,7 +121,9 @@ function getBpmAt(point, timeArray, defaultBpm) {
 
 function processMC() {
     const fileInput = document.getElementById("mcFile");
-    const baseBpmInput = parseFloat(document.getElementById("baseBpm").value);
+    let baseBpmInput = parseFloat(document.getElementById("baseBpm").value);
+    if (isNaN(baseBpmInput) || baseBpmInput <= 0) baseBpmInput = 160;
+    
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
     
@@ -131,22 +140,33 @@ function processMC() {
     
     reader.onload = function(e) {
         try {
-            const data = JSON.parse(e.target.result);
-            if (!data.note || !data.time) {
-                msgDiv.style.color = "#d32f2f";
-                return msgDiv.innerHTML = "無効な譜面データです。";
+            // BOM(見えない特殊文字)が含まれている場合は除去してパース
+            let rawStr = e.target.result;
+            let cleanStr = rawStr.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            
+            if (!data.note || !Array.isArray(data.note)) {
+                throw new Error("譜面データに note 配列が存在しません。");
+            }
+            if (!data.time || !Array.isArray(data.time)) {
+                data.time =[]; // timeが無くてもエラーにしない
             }
 
             const notes = data.note;
-            const origTimeEvents = JSON.parse(JSON.stringify(data.time)); // BPM参照用
+            const origTimeEvents = JSON.parse(JSON.stringify(data.time));
             let logTexts =[];
             
             // 1. 全スライドから「逆行」を検知し、巻き戻りイベントを抽出
             let globalTriggers =[];
             
             for (let note of notes) {
-                if (note.seg && Array.isArray(note.seg)) {
-                    let cleanSegs = note.seg.map(s => ({ origBeat: snapToBeat(beatToPoint(s.beat)), x: s.x }));
+                // seg配列を持つスライドノーツのみ処理
+                if (note && note.beat && note.seg && Array.isArray(note.seg)) {
+                    // 安全なbeatオブジェクトのリストを作成
+                    let cleanSegs = note.seg.map(s => ({ 
+                        origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))), 
+                        x: (typeof s.x === 'number') ? s.x : 0 
+                    }));
                     
                     for (let i = 1; i < cleanSegs.length; i++) {
                         let prev = cleanSegs[i-1];
@@ -155,7 +175,7 @@ function processMC() {
                         // 直前より時間が戻っているか？(微小ズレは無視して判定)
                         if (beatToPoint(curr.origBeat) < beatToPoint(prev.origBeat) - 1e-4) {
                             let diffBeat = beatSub(prev.origBeat, curr.origBeat);
-                            let origAbsBeat = beatAdd(note.beat, prev.origBeat); // 逆行が発動する絶対時間
+                            let origAbsBeat = beatAdd(safeBeat(note.beat), prev.origBeat); // 逆行が発動する絶対時間
                             
                             globalTriggers.push({
                                 origAbsBeat: origAbsBeat,
@@ -200,27 +220,32 @@ function processMC() {
                 return shift;
             }
 
-            const EPSILON =[0, 1, 9999]; // 1/9999の近似化 (被り回避用)
+            const EPSILON = [0, 1, 9999]; // 1/9999の近似化 (被り回避用)
 
             // 2. 全てのノーツの配置時間を未来へずらし、音ズレを補正する
             for (let note of notes) {
-                let origNotePoint = beatToPoint(note.beat);
+                if (!note || !note.beat) continue; // beatが無い特殊ノーツは無視
+                
+                let origNotePoint = beatToPoint(safeBeat(note.beat));
                 let noteShift = getGlobalShift(origNotePoint - 1e-4); 
                 
-                note.beat = beatAdd(note.beat, noteShift);
+                note.beat = beatAdd(safeBeat(note.beat), noteShift);
 
                 if (note.seg && Array.isArray(note.seg)) {
-                    let cleanSegs = note.seg.map(s => ({ origBeat: snapToBeat(beatToPoint(s.beat)), x: s.x }));
+                    let cleanSegs = note.seg.map(s => ({ 
+                        origBeat: snapToBeat(beatToPoint(safeBeat(s.beat))), 
+                        x: (typeof s.x === 'number') ? s.x : 0 
+                    }));
                     let newSeg =[];
                     
                     for (let i = 0; i < cleanSegs.length; i++) {
-                        let currOrigAbsBeat = beatAdd(origNotePoint, cleanSegs[i].origBeat);
+                        let currOrigAbsBeat = beatAdd(safeBeat([Math.floor(origNotePoint), 0, 1]), cleanSegs[i].origBeat); 
                         let currOrigAbsPoint = beatToPoint(currOrigAbsBeat);
                         
                         let segShift = getGlobalShift(currOrigAbsPoint);
                         let newAbsBeat = beatAdd(currOrigAbsBeat, segShift);
                         
-                        let segItem = { beat: beatSub(newAbsBeat, note.beat), x: cleanSegs[i].x };
+                        let segItem = { beat: beatSub(newAbsBeat, safeBeat(note.beat)), x: cleanSegs[i].x };
                         
                         // ワープ回避：逆走する直前のsegを 1/9999 手前に近似化する
                         let isTriggerPoint = false;
@@ -230,7 +255,7 @@ function processMC() {
                             }
                         }
                         if (isTriggerPoint) {
-                            segItem.beat = beatSub(segItem.beat, EPSILON);
+                            segItem.beat = beatSub(safeBeat(segItem.beat), EPSILON);
                         }
                         
                         newSeg.push(segItem);
@@ -243,19 +268,22 @@ function processMC() {
             let newTimeEvents =[];
             
             for (let ev of data.time) {
-                let p = beatToPoint(ev.beat);
-                ev.beat = beatAdd(ev.beat, getGlobalShift(p));
+                if (!ev || !ev.beat) continue;
+                let p = beatToPoint(safeBeat(ev.beat));
+                ev.beat = beatAdd(safeBeat(ev.beat), getGlobalShift(p));
                 newTimeEvents.push(ev);
             }
 
             for (let b of uniqueTriggers) {
                 let bpm = getBpmAt(b.origAbsPoint, origTimeEvents, baseBpmInput);
+                if (bpm <= 0) bpm = 160; // ゼロ割防止
                 
                 // ★ Malody専用のDelay値計算 ★
                 // (実際のミリ秒ではなく「小節数 × 1拍のミリ秒」になる仕様)
                 let diffPoint = beatToPoint(b.diffBeat);
                 let delayValue = - (diffPoint * (60000 / bpm));
                 
+                // 有効数字15桁で正確に指定
                 let exactDelay = parseFloat(delayValue.toPrecision(15));
                 
                 let shiftBefore = getGlobalShift(b.origAbsPoint);
@@ -270,7 +298,7 @@ function processMC() {
                 logTexts.push(`⏱️ 展開位置 [${delayAbsBeat.join(",")}] に Delay ${exactDelay} を追加しました`);
             }
 
-            newTimeEvents.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
+            newTimeEvents.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
             data.time = newTimeEvents;
 
             const outJson = JSON.stringify(data); 
@@ -292,7 +320,9 @@ function processMC() {
         } catch (err) {
             console.error(err);
             msgDiv.style.color = "#d32f2f";
-            msgDiv.innerHTML = "ファイルの解析に失敗しました。データが破損している可能性があります。";
+            msgDiv.innerHTML = `<b>ファイルの解析に失敗しました。</b><br>
+            <div class="log-box error-log">エラー詳細：<br>${err.message}<br><br>${err.stack}</div>
+            <span class="note">※もしよろしければ、この赤枠のエラー文を教えていただけるとすぐに修正できます！</span>`;
         }
     };
     reader.readAsText(file);
