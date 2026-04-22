@@ -5,23 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BPM Multi-Generator</title>
     <style>
-        [span_0](start_span):root { --primary: #007aff;[span_0](end_span) --bg: #f2f2f7; --card: #ffffff; --danger: #ff3b30; [span_1](start_span)}
-        body { font-family: -apple-system, sans-serif;[span_1](end_span) background: var(--bg); margin: 0; padding: 20px; color: #333; [span_2](start_span)}
-        .card { background: var(--card);[span_2](end_span) [span_3](start_span)border-radius: 15px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-width: 500px; margin: auto;[span_3](end_span) [span_4](start_span)}
-        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 2px solid var(--bg); padding-bottom: 10px;[span_4](end_span) [span_5](start_span)}
-        .global-settings { background: #eef; padding: 10px; border-radius: 8px; margin-bottom: 20px; display: flex;[span_5](end_span) align-items: center; gap: 10px; [span_6](start_span)}
-        .point-container { border-left: 3px solid var(--primary); padding-left: 15px;[span_6](end_span) margin-bottom: 20px; position: relative; [span_7](start_span)}
-        .point-title { font-size: 0.9rem; font-weight: bold; color: var(--primary);[span_7](end_span) margin-bottom: 10px; display: flex; justify-content: space-between; [span_8](start_span)}
-        .remove-btn { color: var(--danger); background: none;[span_8](end_span) border: none; font-size: 0.8rem; cursor: pointer; padding: 0; [span_9](start_span)}
-        .row { display: flex;[span_9](end_span) gap: 8px; margin-bottom: 12px; align-items: center; [span_10](start_span)}
-        .input-box { flex: 1;[span_10](end_span) [span_11](start_span)}
-        label { font-size: 0.75rem; display: block; margin-bottom: 4px; color: #555;[span_11](end_span) [span_12](start_span)}
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;[span_12](end_span) font-size: 16px; box-sizing: border-box; [span_13](start_span)}
-        .add-btn { background: #e5e5ea; color: #333; border: none;[span_13](end_span) [span_14](start_span)padding: 12px; border-radius: 8px; font-size: 0.9rem; width: 100%; font-weight: bold; margin-bottom: 20px; cursor: pointer;[span_14](end_span) [span_15](start_span)}
-        .generate-btn { width: 100%; background: var(--primary); color: white; border: none; padding: 15px;[span_15](end_span) border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; [span_16](start_span)}
-        .generate-btn:active, .add-btn:active { opacity: 0.7;[span_16](end_span) [span_17](start_span)}
-        textarea { width: 100%; margin-top: 20px; border-radius: 8px; border: 1px solid #ddd;[span_17](end_span) [span_18](start_span)padding: 10px; font-family: monospace; font-size: 12px; box-sizing: border-box; background: #fafafa;[span_18](end_span) [span_19](start_span)}
-        .copy-btn { background: #5856d6; color: white; border: none; padding: 12px; border-radius: 8px;[span_19](end_span) font-weight: bold; width: 100%; margin-top: 10px; cursor: pointer; [span_20](start_span)}
+        :root { --primary: #007aff; --bg: #f2f2f7; --card: #ffffff; --danger: #ff3b30; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
+        .card { background: var(--card); border-radius: 15px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-width: 500px; margin: auto; }
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 2px solid var(--bg); padding-bottom: 10px; }
+        .global-settings { background: #eef; padding: 10px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .point-container { border-left: 3px solid var(--primary); padding-left: 15px; margin-bottom: 20px; position: relative; }
+        .point-title { font-size: 0.9rem; font-weight: bold; color: var(--primary); margin-bottom: 10px; display: flex; justify-content: space-between; }
+        .remove-btn { color: var(--danger); background: none; border: none; font-size: 0.8rem; cursor: pointer; padding: 0; }
+        .row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+        .input-box { flex: 1; }
+        label { font-size: 0.75rem; display: block; margin-bottom: 4px; color: #555; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .add-btn { background: #e5e5ea; color: #333; border: none; padding: 12px; border-radius: 8px; font-size: 0.9rem; width: 100%; font-weight: bold; margin-bottom: 20px; cursor: pointer; }
+        .generate-btn { width: 100%; background: var(--primary); color: white; border: none; padding: 15px; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; }
+        .generate-btn:active, .add-btn:active { opacity: 0.7; }
+        textarea { width: 100%; margin-top: 20px; border-radius: 8px; border: 1px solid #ddd; padding: 10px; font-family: monospace; font-size: 12px; box-sizing: border-box; background: #fafafa; }
+        .copy-btn { background: #5856d6; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; width: 100%; margin-top: 10px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -38,36 +38,37 @@
         <div class="point-container point-node">
             <div class="point-title"><span>ポイント 1 (開始)</span></div>
             <div class="row">
-                <div class="input-box"><label>小節</label><input type="number" class="bar" value="0"></div>[span_20](end_span)
-                [span_21](start_span)<div class="input-box"><label>拍</label><input type="number" class="tick" value="0"></div>[span_21](end_span)
-                [span_22](start_span)<div class="input-box"><label>BPM値</label><input type="number" class="bpm" step="0.1" value="131.0"></div>[span_22](end_span)
+                <div class="input-box"><label>小節</label><input type="number" class="bar" value="0"></div>
+                <div class="input-box"><label>拍</label><input type="number" class="tick" value="0"></div>
+                <div class="input-box"><label>BPM値</label><input type="number" class="bpm" step="0.1" value="131.0"></div>
             </div>
         </div>
         <div class="point-container point-node">
             <div class="point-title"><span>ポイント 2</span></div>
             <div class="row">
-                [span_23](start_span)<div class="input-box"><label>小節</label><input type="number" class="bar" value="4"></div>[span_23](end_span)
-                [span_24](start_span)<div class="input-box"><label>拍</label><input type="number" class="tick" value="0"></div>[span_24](end_span)
-                [span_25](start_span)<div class="input-box"><label>BPM値</label><input type="number" class="bpm" step="0.1" value="118.0"></div>[span_25](end_span)
+                <div class="input-box"><label>小節</label><input type="number" class="bar" value="4"></div>
+                <div class="input-box"><label>拍</label><input type="number" class="tick" value="0"></div>
+                <div class="input-box"><label>BPM値</label><input type="number" class="bpm" step="0.1" value="118.0"></div>
             </div>
         </div>
     </div>
 
-    [span_26](start_span)<button class="add-btn" onclick="addPoint()">＋ ポイントを追加</button>[span_26](end_span)
+    <button class="add-btn" onclick="addPoint()">＋ ポイントを追加</button>
 
-    [span_27](start_span)<button class="generate-btn" onclick="generate()">コードを一括生成する</button>[span_27](end_span)
+    <button class="generate-btn" onclick="generate()">コードを一括生成する</button>
     
-    [span_28](start_span)<textarea id="out" rows="8" readonly placeholder="ここに繋がったコードが生成されます"></textarea>[span_28](end_span)
-    [span_29](start_span)<button class="copy-btn" onclick="copyText()">結果をコピー</button>[span_29](end_span)
+    <textarea id="out" rows="8" readonly placeholder="ここに繋がったコードが生成されます"></textarea>
+    <button class="copy-btn" onclick="copyText()">結果をコピー</button>
 </div>
 
 <script>
-[span_30](start_span)let pointCount = 2;[span_30](end_span)
+let pointCount = 2;
+
 function addPoint() {
-    [span_31](start_span)pointCount++;[span_31](end_span)
-    [span_32](start_span)const area = document.getElementById('pointsArea');[span_32](end_span)
-    [span_33](start_span)const newPoint = document.createElement('div');[span_33](end_span)
-    [span_34](start_span)newPoint.className = 'point-container point-node';[span_34](end_span)
+    pointCount++;
+    const area = document.getElementById('pointsArea');
+    const newPoint = document.createElement('div');
+    newPoint.className = 'point-container point-node';
     newPoint.innerHTML = `
         <div class="point-title">
             <span>ポイント ${pointCount}</span>
@@ -78,60 +79,65 @@ function addPoint() {
             <div class="input-box"><label>拍</label><input type="number" class="tick" value=""></div>
             <div class="input-box"><label>BPM値</label><input type="number" class="bpm" step="0.1" value=""></div>
         </div>
-    [span_35](start_span)`;[span_35](end_span)
-    [span_36](start_span)area.appendChild(newPoint);[span_36](end_span)
+    `;
+    area.appendChild(newPoint);
 }
 
 function generate() {
-    [span_37](start_span)const points = document.querySelectorAll('.point-node');[span_37](end_span)
-    [span_38](start_span)const div = parseInt(document.getElementById('globalDiv').value);[span_38](end_span)
-    [span_39](start_span)let res = [];[span_39](end_span)
+    const points = document.querySelectorAll('.point-node');
+    const div = parseInt(document.getElementById('globalDiv').value);
+    let res = [];
     if (points.length < 2) {
-        [span_40](start_span)alert("ポイントは最低2つ必要です");[span_40](end_span)
-        [span_41](start_span)return;[span_41](end_span)
+        alert("ポイントは最低2つ必要です");
+        return;
     }
 
     for (let i = 0; i < points.length - 1; i++) {
-        [span_42](start_span)const p1 = points[i];[span_42](end_span)
-        [span_43](start_span)const p2 = points[i+1];[span_43](end_span)
+        const p1 = points[i];
+        const p2 = points[i+1];
 
-        const b1 = parseInt(p1.querySelector('.bar').value) || [span_44](start_span)0;[span_44](end_span)
-        const t1 = parseInt(p1.querySelector('.tick').value) || [span_45](start_span)0;[span_45](end_span)
-        const bpm1 = parseFloat(p1.querySelector('.bpm').value) || [span_46](start_span)0;[span_46](end_span)
+        const b1 = parseInt(p1.querySelector('.bar').value) || 0;
+        const t1 = parseInt(p1.querySelector('.tick').value) || 0;
+        const bpm1 = parseFloat(p1.querySelector('.bpm').value) || 0;
 
-        const b2 = parseInt(p2.querySelector('.bar').value) || [span_47](start_span)0;[span_47](end_span)
-        const t2 = parseInt(p2.querySelector('.tick').value) || [span_48](start_span)0;[span_48](end_span)
-        const bpm2 = parseFloat(p2.querySelector('.bpm').value) || [span_49](start_span)0;[span_49](end_span)
+        const b2 = parseInt(p2.querySelector('.bar').value) || 0;
+        const t2 = parseInt(p2.querySelector('.tick').value) || 0;
+        const bpm2 = parseFloat(p2.querySelector('.bpm').value) || 0;
 
-        [span_50](start_span)const startTotal = b1 * div + t1;[span_50](end_span)
-        [span_51](start_span)const endTotal = b2 * div + t2;[span_51](end_span)
-        [span_52](start_span)const steps = endTotal - startTotal;[span_52](end_span)
+        const startTotal = b1 * div + t1;
+        const endTotal = b2 * div + t2;
+        const steps = endTotal - startTotal;
+
         if (steps <= 0) {
-            [span_53](start_span)alert(`エラー: ポイント${i+1} から ${i+2} の位置関係がおかしいです。後の時間を指定してください。`);[span_53](end_span)
-            [span_54](start_span)return;[span_54](end_span)
+            alert(`エラー: ポイント${i+1} から ${i+2} の位置関係がおかしいです。`);
+            return;
         }
 
-        [span_55](start_span)const bpmDiff = (bpm2 - bpm1) / steps;[span_55](end_span)
-        [span_56](start_span)const isLastSection = (i === points.length - 2);[span_56](end_span)
-        [span_57](start_span)const loopEnd = isLastSection ? steps : steps - 1;[span_57](end_span)
+        const bpmDiff = (bpm2 - bpm1) / steps;
+        const isLastSection = (i === points.length - 2);
+        const loopEnd = isLastSection ? steps : steps - 1;
+
         for (let j = 0; j <= loopEnd; j++) {
-            [span_58](start_span)let t = startTotal + j;[span_58](end_span)
-            [span_59](start_span)let b = Math.floor(t / div);[span_59](end_span)
-            [span_60](start_span)let tk = t % div;[span_60](end_span)
-            [span_61](start_span)let val = parseFloat((bpm1 + (bpmDiff * j)).toFixed(8));[span_61](end_span)
-            [span_62](start_span)res.push(`{"beat":[${b},${tk},${div}],"bpm":${val}}`);[span_62](end_span)
+            let t = startTotal + j;
+            let b = Math.floor(t / div);
+            let tk = t % div;
+            let val = parseFloat((bpm1 + (bpmDiff * j)).toFixed(8));
+            
+            // 整数でも必ず小数点(例: 131.0)が付くようにフォーマット
+            let valStr = val % 1 === 0 ? val.toFixed(1) : val.toString();
+            
+            res.push(`{"beat":[${b},${tk},${div}],"bpm":${valStr}}`);
         }
     }
-    [span_63](start_span)document.getElementById('out').value = res.join(",");[span_63](end_span)
+    document.getElementById('out').value = res.join(",");
 }
 
 function copyText() {
-    [span_64](start_span)const out = document.getElementById('out');[span_64](end_span)
-    [span_65](start_span)if (!out.value) return;[span_65](end_span)
-    [span_66](start_span)out.select();[span_66](end_span)
-    [span_67](start_span)out.setSelectionRange(0, 99999);[span_67](end_span)
-    [span_68](start_span)document.execCommand("copy");[span_68](end_span)
-    [span_69](start_span)alert("コピーしました！");[span_69](end_span)
+    const out = document.getElementById('out');
+    if (!out.value) return;
+    out.select();
+    document.execCommand("copy");
+    alert("コピーしました！");
 }
 </script>
 
