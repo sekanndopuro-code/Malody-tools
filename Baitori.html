@@ -13,6 +13,11 @@
         label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
         input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
         
+        .radio-group { background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c8e6c9; }
+        .radio-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
+        .radio-group label:last-child { margin-bottom: 0; }
+        .note { font-size: 0.8em; color: #666; margin-top: 3px; display: block; line-height: 1.4; }
+
         button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
         .btn-process { background: #009688; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(0, 150, 136, 0.3); }
         .btn-process:hover { background: #00796b; }
@@ -38,6 +43,22 @@
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
+    <!-- 2倍にする対象の設定 -->
+    <div class="radio-group">
+        <label style="font-weight: bold; margin-bottom: 10px; color: #1b5e20;">⚙️ 2倍にする対象</label>
+        <label style="color: #666;">
+            <input type="checkbox" checked disabled> <b>BPMの数値</b> (130 → 260) ※必須
+        </label>
+        <label>
+            <input type="checkbox" id="doubleTimeBeat" checked> <b>BPM変化のタイミング</b> (timeイベントのbeat)
+            <span class="note" style="margin-left:25px;">実時間とズレないようにBPM変更が起きる位置も2倍に引き伸ばします。</span>
+        </label>
+        <label>
+            <input type="checkbox" id="doubleAllBeat"> <b>ノーツやエフェクトのタイミングも全て</b>
+            <span class="note" style="margin-left:25px;">まだノーツを自力で引き伸ばしていない場合はチェックを入れてください。全体が2倍の長さに引き伸ばされます。</span>
+        </label>
+    </div>
+
     <button type="button" class="btn-process" onclick="processMC()">✨ BPMの倍取りを実行</button>
 
     <div id="resultMsg"></div>
@@ -45,8 +66,42 @@
 </div>
 
 <script>
+function safeBeat(beat) {
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
+    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
+}
+
+function beatToPoint(beat) {
+    let b = safeBeat(beat);
+    return b[0] + (b[1] / b[2]);
+}
+
+function gcd(a, b) {
+    return b === 0 ? a : gcd(b, a % b);
+}
+
+// Beatの数値を正確に2倍にする関数
+function doubleBeat(beat) {
+    let b = safeBeat(beat);
+    let m = b[0], n = b[1], d = b[2];
+    
+    let newM = m * 2;
+    let newN = n * 2;
+    let newD = d;
+    
+    let extraM = Math.floor(newN / newD);
+    newM += extraM;
+    newN = newN % newD;
+    
+    if (newN === 0) return[newM, 0, 0];
+    let g = gcd(Math.abs(newN), newD);
+    return [newM, newN / g, newD / g];
+}
+
 function processMC() {
     const fileInput = document.getElementById("mcFile");
+    const doubleTimeBeat = document.getElementById("doubleTimeBeat").checked;
+    const doubleAllBeat = document.getElementById("doubleAllBeat").checked;
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
     
@@ -73,29 +128,63 @@ function processMC() {
             }
 
             let logTexts =[];
-            let convertedCount = 0;
+            let convertedBpmCount = 0;
 
-            // すべてのtimeイベントを確認し、BPMを2倍にする
+            // 1. timeイベントのBPM数値とタイミングを2倍にする
             for (let i = 0; i < data.time.length; i++) {
                 let ev = data.time[i];
+                
+                // BPMの数値を2倍にする
                 if (typeof ev.bpm === 'number') {
                     let oldBpm = ev.bpm;
-                    // 2倍にして、浮動小数点演算特有の微小な誤差が出ないよう有効数字15桁で丸める
+                    // 浮動小数点演算特有の微小な誤差が出ないよう有効数字15桁で丸める
                     let newBpm = parseFloat((oldBpm * 2).toPrecision(15));
-                    
                     ev.bpm = newBpm;
-                    convertedCount++;
+                    convertedBpmCount++;
                     
-                    // ログに数個だけサンプルを表示
-                    if (convertedCount <= 10) {
-                        logTexts.push(`⏱️ Beat[${ev.beat.join(",")}] : ${oldBpm} ➡️ <b>${newBpm}</b>`);
-                    } else if (convertedCount === 11) {
-                        logTexts.push(`...他 ${data.time.length - 10} 箇所を処理しました`);
+                    if (convertedBpmCount <= 10) {
+                        logTexts.push(`⏱️ BPM変更 : ${oldBpm} ➡️ <b>${newBpm}</b>`);
+                    } else if (convertedBpmCount === 11) {
+                        logTexts.push(`...他 ${data.time.length - 10} 箇所のBPMを処理しました`);
                     }
+                }
+                
+                // タイミングも2倍にする
+                if (doubleTimeBeat && ev.beat) {
+                    ev.beat = doubleBeat(ev.beat);
                 }
             }
 
-            if (convertedCount === 0) {
+            // タイミングが変わった可能性があるのでソートし直す
+            if (doubleTimeBeat) {
+                data.time.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+            }
+
+            // 2. ノーツやエフェクトのタイミングもすべて2倍にする場合
+            if (doubleAllBeat) {
+                if (data.note && Array.isArray(data.note)) {
+                    for (let n of data.note) {
+                        if (n.beat) n.beat = doubleBeat(n.beat);
+                        if (n.seg && Array.isArray(n.seg)) {
+                            for (let s of n.seg) {
+                                if (s.beat) s.beat = doubleBeat(s.beat);
+                            }
+                        }
+                    }
+                    data.note.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+                    logTexts.push(`🎵 すべてのノーツの配置タイミングを2倍にしました`);
+                }
+                
+                if (data.effect && Array.isArray(data.effect)) {
+                    for (let e of data.effect) {
+                        if (e.beat) e.beat = doubleBeat(e.beat);
+                    }
+                    data.effect.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+                    logTexts.push(`✨ すべてのエフェクトの配置タイミングを2倍にしました`);
+                }
+            }
+
+            if (convertedBpmCount === 0) {
                 msgDiv.style.color = "#d32f2f";
                 return msgDiv.innerHTML = "BPMのデータが1つも見つかりませんでした。";
             }
@@ -113,7 +202,7 @@ function processMC() {
             dlLink.style.display = "block";
             
             msgDiv.style.color = "#28a745";
-            msgDiv.innerHTML = `<b>🎉 変換完了！ 合計 ${convertedCount} 箇所のBPMを2倍にしました！</b><br>
+            msgDiv.innerHTML = `<b>🎉 変換完了！ 合計 ${convertedBpmCount} 箇所のBPMを処理しました！</b><br>
             <div class="log-box">${logTexts.join("<br>")}</div>`;
 
         } catch (err) {
