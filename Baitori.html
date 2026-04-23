@@ -3,288 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BPM補正つき 等差Scrollジェネレーター</title>
+    <title>倍取りツール (BPM x2)</title>
     <style>
-        :root { --primary: #007aff; --bg: #f2f2f7; --card: #ffffff; --danger: #ff3b30; --success: #34c759; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
-        .card { background: var(--card); border-radius: 15px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-width: 600px; margin: auto; }
-        h2 { margin-top: 0; font-size: 1.3rem; border-bottom: 2px solid var(--bg); padding-bottom: 10px; color: #222; }
-        .desc { font-size: 0.85rem; color: #555; margin-bottom: 20px; line-height: 1.5; }
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .desc { font-size: 0.85em; color: #555; margin-top: -10px; margin-bottom: 20px; line-height: 1.4; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
         
-        .global-settings { background: #eef8ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #cce5ff; }
-        .setting-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-        .setting-row:last-child { margin-bottom: 0; }
-        .setting-row label { flex: 1; font-weight: bold; font-size: 0.9rem; color: #0056b3; }
-        .setting-row input { width: 100px; padding: 8px; border: 1px solid #b8daff; border-radius: 6px; font-weight: bold; }
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
+        .btn-process { background: #009688; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(0, 150, 136, 0.3); }
+        .btn-process:hover { background: #00796b; }
         
-        .point-container { border-left: 4px solid var(--primary); padding-left: 15px; margin-bottom: 15px; background: #fafafa; padding: 10px 10px 10px 15px; border-radius: 0 8px 8px 0; }
-        .point-title { font-size: 0.95rem; font-weight: bold; color: var(--primary); margin-bottom: 10px; display: flex; justify-content: space-between; }
-        .remove-btn { color: var(--danger); background: none; border: 1px solid var(--danger); border-radius: 4px; font-size: 0.75rem; cursor: pointer; padding: 4px 8px; }
-        .row { display: flex; gap: 10px; align-items: center; }
-        .input-box { flex: 1; }
-        label { font-size: 0.75rem; display: block; margin-bottom: 4px; color: #666; font-weight: bold; }
-        input[type="number"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box; }
-        
-        textarea { width: 100%; height: 150px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ccc; padding: 10px; font-family: monospace; font-size: 12px; box-sizing: border-box; resize: vertical; }
-        
-        .btn-group { display: flex; gap: 10px; margin-bottom: 15px; }
-        button { flex: 1; border: none; padding: 12px; border-radius: 8px; font-size: 0.95rem; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        button:active { transform: scale(0.98); }
-        .add-btn { background: #e5e5ea; color: #333; }
-        .add-btn:hover { background: #d1d1d6; }
-        .generate-btn { background: var(--primary); color: white; }
-        .generate-btn:hover { background: #005bb5; }
-        .copy-btn { background: var(--success); color: white; margin-top: 5px; }
-        .copy-btn:hover { background: #28a745; }
-        
-        #resultMsg { font-size: 0.9rem; font-weight: bold; text-align: center; margin-top: 10px; }
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
+        #dlLink:hover { background: #0056b3; }
+        #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
+        .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
+        .error-log { color: #d32f2f; background: #ffebee; border-color: #f5c6cb; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h2>🌀 BPM補正つき 等差Scrollジェネレーター</h2>
+<div class="container">
+    <h1>⏫ 倍取りツール (BPM x2)</h1>
     <p class="desc">
-        MC譜面データを貼り付けると、指定区間に等差数列による<code>scroll</code>を生成し、<code>effect</code>配列に追加します。<br>
-        同時に、譜面内のBPM変化を読み取り、<b>見た目のスクロール速度が狂わないよう自動でBPM相殺計算</b>を行います。
+        譜面データ内にある<b>すべてのBPM設定を一括で「2倍」</b>にします。<br>
+        BPM変化が激しい曲の倍取り作業をボタン1つで完了させます。
     </p>
-
-    <textarea id="inputJson" placeholder="ここに .mc ファイルのデータ(JSON) をすべて貼り付けてください"></textarea>
     
-    <div class="global-settings">
-        <div class="setting-row">
-            <label>基準の「割る数」 (Base BPM)</label>
-            <input type="number" id="baseBpm" value="240">
-        </div>
-        <div class="setting-row">
-            <label>全体分割数 (分母: 32分音符など)</label>
-            <input type="number" id="globalDiv" value="32">
-        </div>
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>📁 対象の .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
     </div>
 
-    <div id="pointsArea">
-        <div class="point-container point-node">
-            <div class="point-title"><span>📍 ポイント 1 (開始)</span></div>
-            <div class="row">
-                <div class="input-box"><label>小節</label><input type="number" class="bar" value="3"></div>
-                <div class="input-box"><label>拍</label><input type="number" class="tick" value="0"></div>
-                <div class="input-box"><label>目標 Scroll倍率</label><input type="number" class="scroll" step="0.1" value="1.0"></div>
-            </div>
-        </div>
-        <div class="point-container point-node">
-            <div class="point-title"><span>📍 ポイント 2</span></div>
-            <div class="row">
-                <div class="input-box"><label>小節</label><input type="number" class="bar" value="4"></div>
-                <div class="input-box"><label>拍</label><input type="number" class="tick" value="0"></div>
-                <div class="input-box"><label>目標 Scroll倍率</label><input type="number" class="scroll" step="0.1" value="5.0"></div>
-            </div>
-        </div>
-    </div>
+    <button type="button" class="btn-process" onclick="processMC()">✨ BPMの倍取りを実行</button>
 
-    <div class="btn-group">
-        <button class="add-btn" onclick="addPoint()">➕ ポイントを追加</button>
-        <button class="generate-btn" onclick="process()">🚀 生成して書き込む</button>
-    </div>
-    
     <div id="resultMsg"></div>
-    <textarea id="outputJson" placeholder="ここに書き込み済みのJSONが出力されます" readonly></textarea>
-    <button class="copy-btn" onclick="copyText()">📋 出力結果をコピー</button>
+    <a id="dlLink" href="#">💾 変換済みファイルをダウンロード</a>
 </div>
 
 <script>
-let pointCount = 2;
-
-function addPoint() {
-    pointCount++;
-    const area = document.getElementById('pointsArea');
-    const newPoint = document.createElement('div');
-    newPoint.className = 'point-container point-node';
-    newPoint.innerHTML = `
-        <div class="point-title">
-            <span>📍 ポイント ${pointCount}</span>
-            <button class="remove-btn" onclick="this.parentElement.parentElement.remove()">削除 ✕</button>
-        </div>
-        <div class="row">
-            <div class="input-box"><label>小節</label><input type="number" class="bar" value=""></div>
-            <div class="input-box"><label>拍</label><input type="number" class="tick" value=""></div>
-            <div class="input-box"><label>目標 Scroll倍率</label><input type="number" class="scroll" step="0.1" value=""></div>
-        </div>
-    `;
-    area.appendChild(newPoint);
-    updateLabels();
-}
-
-function updateLabels() {
-    const titles = document.querySelectorAll('.point-title span');
-    titles.forEach((el, idx) => {
-        el.innerText = `📍 ポイント ${idx + 1} ${idx === 0 ? '(開始)' : ''}`;
-    });
-}
-
-function safeBeat(beat) {
-    if (!beat || !Array.isArray(beat) || beat.length < 3) return[0, 0, 1];
-    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
-}
-
-function beatToPoint(beat) {
-    let b = safeBeat(beat);
-    return b[0] + (b[1] / b[2]);
-}
-
-// 任意の時間(point)におけるBPMを取得する関数
-function getBpmAt(point, timeArray, fallbackBpm) {
-    let bpm = fallbackBpm;
-    if (Array.isArray(timeArray)) {
-        for (let ev of timeArray) {
-            if (ev.bpm !== undefined && beatToPoint(ev.beat) <= point + 1e-6) {
-                bpm = ev.bpm;
-            }
-        }
-    }
-    return bpm;
-}
-
-function process() {
-    const inputJson = document.getElementById('inputJson').value.trim();
-    const baseBpm = parseFloat(document.getElementById('baseBpm').value);
-    const div = parseInt(document.getElementById('globalDiv').value);
-    const msgDiv = document.getElementById('resultMsg');
+function processMC() {
+    const fileInput = document.getElementById("mcFile");
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlLink");
     
     msgDiv.innerHTML = "";
-    msgDiv.style.color = "#333";
+    dlLink.style.display = "none";
 
-    if (!inputJson) {
-        msgDiv.style.color = "var(--danger)";
-        msgDiv.innerHTML = "譜面データ(JSON)を貼り付けてください！";
-        return;
-    }
-    if (isNaN(baseBpm) || isNaN(div) || div <= 0) {
-        msgDiv.style.color = "var(--danger)";
-        msgDiv.innerHTML = "基準BPMと分割数には正しい数値を入力してください！";
-        return;
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "ファイルを選択してください。";
     }
 
-    let data;
-    try {
-        data = JSON.parse(inputJson);
-    } catch(e) {
-        msgDiv.style.color = "var(--danger)";
-        msgDiv.innerHTML = "JSONの解析に失敗しました。正しいmcデータを貼り付けてください。";
-        return;
-    }
-
-    // effect配列がなければ作成
-    if (!data.effect || !Array.isArray(data.effect)) data.effect = [];
-    const timeArray = data.time ||[];
-
-    const points = document.querySelectorAll('.point-node');
-    if (points.length < 2) {
-        msgDiv.style.color = "var(--danger)";
-        msgDiv.innerHTML = "ポイントは最低2つ必要です！";
-        return;
-    }
-
-    let generatedEffects =[];
-
-    // 等差数列生成ループ
-    for (let i = 0; i < points.length - 1; i++) {
-        const p1 = points[i];
-        const p2 = points[i+1];
-
-        const b1 = parseInt(p1.querySelector('.bar').value) || 0;
-        const t1 = parseInt(p1.querySelector('.tick').value) || 0;
-        const s1 = parseFloat(p1.querySelector('.scroll').value) || 0;
-
-        const b2 = parseInt(p2.querySelector('.bar').value) || 0;
-        const t2 = parseInt(p2.querySelector('.tick').value) || 0;
-        const s2 = parseFloat(p2.querySelector('.scroll').value) || 0;
-
-        const startTotal = b1 * div + t1;
-        const endTotal = b2 * div + t2;
-        const steps = endTotal - startTotal;
-
-        if (steps <= 0) {
-            msgDiv.style.color = "var(--danger)";
-            msgDiv.innerHTML = `⚠️ ポイント ${i+1} と ${i+2} の時間関係が不正です（時間が戻っている、または同じです）。`;
-            return;
-        }
-
-        const scrollDiff = (s2 - s1) / steps;
-        
-        // 最後の区間以外は、終わりの点を省く（次の区間の最初の点と被らないようにする）
-        const isLastSection = (i === points.length - 2);
-        const loopEnd = isLastSection ? steps : steps - 1;
-
-        for (let j = 0; j <= loopEnd; j++) {
-            let t = startTotal + j;
-            let m = Math.floor(t / div);
-            let tk = t % div;
-            let beatArr = [m, tk, div];
-            let pointVal = beatToPoint(beatArr);
-
-            // 目標とするScroll倍率
-            let targetScroll = s1 + (scrollDiff * j);
-            
-            // その瞬間のBPMを取得
-            let currentBpm = getBpmAt(pointVal, timeArray, baseBpm);
-            if (currentBpm === 0) currentBpm = baseBpm; // ゼロ割防止
-            
-            // ★BPM補正計算： 目標倍率 × (基準BPM / 現在BPM)
-            let finalScroll = targetScroll * (baseBpm / currentBpm);
-            
-            // JSの計算誤差を消すため、小数点第10位で丸め
-            finalScroll = parseFloat(finalScroll.toFixed(10));
-
-            generatedEffects.push({
-                beat: beatArr,
-                scroll: finalScroll
-            });
-        }
-    }
-
-    // ★ 重複マージ処理 ★
-    // 同じBeatタイミングに既存のエフェクト(例:bgg等)がある場合、scrollプロパティだけを上書きする
-    let effectMap = new Map();
+    const file = fileInput.files[0];
+    const reader = new FileReader();
     
-    for (let ev of data.effect) {
-        if (!ev.beat) continue;
-        let ptStr = beatToPoint(ev.beat).toFixed(6); // 微小誤差吸収のためのキー
-        if (!effectMap.has(ptStr)) {
-            effectMap.set(ptStr, Object.assign({}, ev));
-        } else {
-            Object.assign(effectMap.get(ptStr), ev);
+    reader.onload = function(e) {
+        try {
+            let rawStr = e.target.result;
+            let cleanStr = rawStr.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            
+            if (!data.time || !Array.isArray(data.time)) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "譜面データにBPM情報 (time配列) が見つかりませんでした。";
+            }
+
+            let logTexts =[];
+            let convertedCount = 0;
+
+            // すべてのtimeイベントを確認し、BPMを2倍にする
+            for (let i = 0; i < data.time.length; i++) {
+                let ev = data.time[i];
+                if (typeof ev.bpm === 'number') {
+                    let oldBpm = ev.bpm;
+                    // 2倍にして、浮動小数点演算特有の微小な誤差が出ないよう有効数字15桁で丸める
+                    let newBpm = parseFloat((oldBpm * 2).toPrecision(15));
+                    
+                    ev.bpm = newBpm;
+                    convertedCount++;
+                    
+                    // ログに数個だけサンプルを表示
+                    if (convertedCount <= 10) {
+                        logTexts.push(`⏱️ Beat[${ev.beat.join(",")}] : ${oldBpm} ➡️ <b>${newBpm}</b>`);
+                    } else if (convertedCount === 11) {
+                        logTexts.push(`...他 ${data.time.length - 10} 箇所を処理しました`);
+                    }
+                }
+            }
+
+            if (convertedCount === 0) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "BPMのデータが1つも見つかりませんでした。";
+            }
+
+            const outJson = JSON.stringify(data); 
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            
+            dlLink.href = url;
+            let originalName = file.name;
+            let dotIndex = originalName.lastIndexOf('.');
+            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
+            dlLink.download = originalName + "_double_bpm.mc";
+            
+            dlLink.style.display = "block";
+            
+            msgDiv.style.color = "#28a745";
+            msgDiv.innerHTML = `<b>🎉 変換完了！ 合計 ${convertedCount} 箇所のBPMを2倍にしました！</b><br>
+            <div class="log-box">${logTexts.join("<br>")}</div>`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = `<b>ファイルの解析に失敗しました。</b><br>
+            <div class="log-box error-log">エラー詳細：<br>${err.message}</div>`;
         }
-    }
-
-    // 生成したScrollをMapに書き込む
-    for (let genEv of generatedEffects) {
-        let ptStr = beatToPoint(genEv.beat).toFixed(6);
-        if (!effectMap.has(ptStr)) {
-            effectMap.set(ptStr, { beat: genEv.beat });
-        }
-        effectMap.get(ptStr).scroll = genEv.scroll;
-    }
-
-    // Mapから配列に戻して時間順にソート
-    data.effect = Array.from(effectMap.values()).sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
-
-    // 結果を出力
-    document.getElementById('outputJson').value = JSON.stringify(data);
-    
-    msgDiv.style.color = "var(--success)";
-    msgDiv.innerHTML = `✅ 生成完了！ ${generatedEffects.length} 個のScrollイベントを追加しました。`;
-}
-
-function copyText() {
-    const out = document.getElementById('outputJson');
-    if (!out.value) return;
-    out.select();
-    out.setSelectionRange(0, 999999);
-    navigator.clipboard.writeText(out.value).then(() => {
-        alert("クリップボードにコピーしました！");
-    }).catch(err => {
-        alert("コピーに失敗しました。手動でコピーしてください。");
-    });
+    };
+    reader.readAsText(file);
 }
 </script>
 
