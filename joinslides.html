@@ -42,7 +42,7 @@
 <div class="container">
     <h1>🔗 直列マージツール</h1>
     <p class="desc">
-        選択されたノーツやスライドを、順番通りに<b>1つの連続したスライド</b>に結合します。<br>
+        選択されたすべてのノーツ（Tap、Wipe、スライド等）を、順番通りに<b>1つの連続したスライド</b>に結合します。<br>
         敷スライド（逆走・折り返し）も形を崩さずにそのまま結合できます。直角スライドの重複バグも自動で回避補正されます。
     </p>
     
@@ -196,14 +196,14 @@ function beatSubSigned(beat1, beat2) {
     const m = Math.floor(diffNum / den);
     const n = diffNum - (m * den);
     
-    if (n === 0) return [m, 0, 0];
+    if (n === 0) return[m, 0, 0];
     const g = gcd(Math.abs(n), den);
     return[m, n / g, den / g];
 }
 
 // 直角スライド等の重複を微小ずらしで回避するパトロール関数
 function fixDuplicateSegs(segArray) {
-    let usedPoints = [0]; // 始点(0,0,0)は常に存在するため最初から登録
+    let usedPoints =[0]; // 始点(0,0,0)は常に存在するため最初から登録
     let fixedCount = 0;
     const MICRO_DEN = 10000; 
     
@@ -219,7 +219,6 @@ function fixDuplicateSegs(segArray) {
         return[newM, newN / g, den / g];
     }
 
-    // そのままの順序で走査する
     for (let i = 0; i < segArray.length; i++) {
         let segItem = segArray[i];
         let p = beatToPoint(segItem.beat);
@@ -330,7 +329,7 @@ function processMC() {
                 const group = parsedGroups[r];
                 const targetNotes =[];
 
-                // 条件に合致する「x座標を持つ全ノーツ」を抽出
+                // ★修正点：x座標を持つすべてのノーツ(スライド含む)を抽出
                 for (let i = 0; i < notes.length; i++) {
                     const note = notes[i];
                     if (allDeletedNotes.has(note)) continue;
@@ -408,8 +407,6 @@ function processMC() {
                         }
                     }
                 }
-
-                // ★ここで全体を時間ソートしない！(敷スライドの逆行を破壊しないため)★
 
                 let newSeg =[];
                 
