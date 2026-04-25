@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>敷スライド保管ツール</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 550px; margin: auto; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .desc { font-size: 0.85em; color: #555; margin-top: -10px; margin-bottom: 20px; line-height: 1.4; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        
+        .radio-group { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbdefb; }
+        .radio-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
+        .radio-group label:last-child { margin-bottom: 0; }
+        
+        .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
+        .btn-add { background: #17a2b8; margin-bottom: 20px; }
+        .btn-add:hover { background: #138496; }
+        .btn-remove { background: #dc3545; padding: 8px 15px; margin-top: 5px; font-size: 0.9em; width: auto; float: right; }
+        .btn-remove:hover { background: #c82333; }
+        .btn-export { background: #007bff; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
+        .btn-export:hover { background: #0056b3; }
+        .btn-restore { background: #ff9800; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(255, 152, 0, 0.3); color: #fff; }
+        .btn-restore:hover { background: #e65100; }
+        .btn-copy { background: #6c757d; margin-top: 5px; }
+        .btn-copy:hover { background: #5a6268; }
+        
+        .clearfix::after { content: ""; clear: both; display: table; }
+        .dl-link { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
+        .dl-link:hover { background: #218838; }
+        #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
+        textarea { width: 100%; height: 120px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 0.85em; resize: vertical; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🛡️ 敷スライド保管ツール</h1>
+    <p class="desc">
+        Malody Vの自動ソートによって破壊されてしまう「敷スライド(逆走スライド)」をテキストとして保管し、いつでも元の状態に復元できる命綱ツールです。
+    </p>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>📁 対象の .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <!-- モード切り替え -->
+    <div class="radio-group">
+        <label style="font-weight: bold; margin-bottom: 10px; color: #0d47a1;">⚙️ モード選択</label>
+        <label>
+            <input type="radio" name="toolMode" value="export" checked onchange="switchMode()"> <b>💾 保管モード (Export)</b>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定範囲内のスライドを抽出し、復元用のテキストデータを作ります。</span>
+        </label>
+        <label style="margin-top: 5px;">
+            <input type="radio" name="toolMode" value="restore" onchange="switchMode()"> <b>🛠️ 復元モード (Restore)</b>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">壊れたmcファイルに、保管したデータを上書きして修復します。</span>
+        </label>
+    </div>
+
+    <!-- 保管モード (Export) のUI -->
+    <div id="exportSection">
+        <div id="rangesContainer">
+            <div class="range-group clearfix" id="range-0">
+                <h4>範囲 1</h4>
+                <div class="form-group">
+                    <label>始点Beat</label>
+                    <input type="text" class="startBeat" placeholder="例: 10, 0, 1">
+                </div>
+                <div class="form-group">
+                    <label>終点Beat</label>
+                    <input type="text" class="endBeat" placeholder="例: 15, 0, 0">
+                </div>
+                <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
+            </div>
+        </div>
+        <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+        <button type="button" class="btn-export" onclick="exportData()">💾 保管データを生成</button>
+
+        <div id="exportResult" style="display:none; margin-top: 20px;">
+            <label style="color: #007bff;">📋 抽出された保管データ (コピーしてメモ帳等に保存)</label>
+            <textarea id="exportText" readonly></textarea>
+            <button type="button" class="btn-copy" onclick="copyExportText()">📋 テキストをコピー</button>
+            <a id="dlExportLink" class="dl-link" href="#">💾 .txt ファイルとしてダウンロード</a>
+        </div>
+    </div>
+
+    <!-- 復元モード (Restore) のUI -->
+    <div id="restoreSection" style="display:none;">
+        <div class="form-group">
+            <label style="color: #e65100;">📋 保管データを貼り付け</label>
+            <span style="font-size:0.8em; color:#666; display:block; margin-bottom:5px;">※以前「保管モード」で作成したテキストをここにペーストするか、テキストファイルを選択して読み込んでください。</span>
+            <input type="file" id="txtFile" accept=".txt,.json" onchange="loadTxtFile()" style="margin-bottom: 10px;">
+            <textarea id="restoreText" placeholder='ここに保管データをペースト...'></textarea>
+        </div>
+        <button type="button" class="btn-restore" onclick="restoreData()">🛠️ 復元を実行</button>
+        <a id="dlRestoreLink" class="dl-link" href="#">💾 復元済みファイルをダウンロード</a>
+    </div>
+
+    <div id="resultMsg"></div>
+</div>
+
+<script>
+let rangeIdCounter = 1;
+
+function switchMode() {
+    const mode = document.querySelector('input[name="toolMode"]:checked').value;
+    document.getElementById("resultMsg").innerHTML = "";
+    if (mode === "export") {
+        document.getElementById("exportSection").style.display = "block";
+        document.getElementById("restoreSection").style.display = "none";
+    } else {
+        document.getElementById("exportSection").style.display = "none";
+        document.getElementById("restoreSection").style.display = "block";
+    }
+}
+
+function addRange() {
+    const container = document.getElementById("rangesContainer");
+    const id = "range-" + rangeIdCounter++;
+    const html = `
+    <div class="range-group clearfix" id="${id}">
+        <h4>範囲指定</h4>
+        <div class="form-group">
+            <label>始点Beat</label>
+            <input type="text" class="startBeat" placeholder="例: 10, 0, 1">
+        </div>
+        <div class="form-group">
+            <label>終点Beat</label>
+            <input type="text" class="endBeat" placeholder="例: 15, 0, 0">
+        </div>
+        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+    </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    updateRangeLabels();
+}
+
+function removeRange(id) {
+    const container = document.getElementById("rangesContainer");
+    if (container.children.length <= 1) {
+        alert("最低でも1つの範囲指定が必要です！");
+        return;
+    }
+    document.getElementById(id).remove();
+    updateRangeLabels();
+}
+
+function updateRangeLabels() {
+    const groups = document.querySelectorAll('.range-group h4');
+    groups.forEach((el, index) => {
+        el.innerText = `範囲 ${index + 1}`;
+    });
+}
+
+function safeBeat(beat) {
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return[0, 0, 1];
+    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
+}
+
+function beatToPoint(beat) {
+    let b = safeBeat(beat);
+    return b[0] + (b[1] / b[2]);
+}
+
+function parseBeat(str) {
+    if (!str) return null;
+    str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const parts = str.match(/-?\d+/g);
+    if (parts && parts.length >= 3) {
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    }
+    return null;
+}
+
+// ==========================================
+// 保管モード (Export)
+// ==========================================
+function exportData() {
+    const fileInput = document.getElementById("mcFile");
+    const msgDiv = document.getElementById("resultMsg");
+    const exportResult = document.getElementById("exportResult");
+    const dlLink = document.getElementById("dlExportLink");
+    
+    msgDiv.innerHTML = "";
+    exportResult.style.display = "none";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "mcファイルを選択してください。";
+    }
+
+    const rangeGroups = document.querySelectorAll('.range-group');
+    const ranges =[];
+    for (let i = 0; i < rangeGroups.length; i++) {
+        const startStr = rangeGroups[i].querySelector('.startBeat').value;
+        const endStr = rangeGroups[i].querySelector('.endBeat').value;
+        const startBeat = parseBeat(startStr);
+        const endBeat = parseBeat(endStr);
+        if (!startBeat || !endBeat) {
+            msgDiv.style.color = "#d32f2f";
+            return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
+        }
+        const startPoint = beatToPoint(startBeat);
+        const endPoint = beatToPoint(endBeat);
+        ranges.push({ min: Math.min(startPoint, endPoint), max: Math.max(startPoint, endPoint) });
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            let cleanStr = e.target.result.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            if (!data.note) throw new Error("note配列が存在しません。");
+
+            const extractedNotes =[];
+
+            for (let note of data.note) {
+                // スライド(segあり)のみを抽出対象とする
+                if (note.seg && Array.isArray(note.seg)) {
+                    const point = beatToPoint(safeBeat(note.beat));
+                    let inRange = false;
+                    for (let r of ranges) {
+                        if (point >= r.min - 0.001 && point <= r.max + 0.001) {
+                            inRange = true; break;
+                        }
+                    }
+                    if (inRange) {
+                        // オブジェクトのディープコピーを保存
+                        extractedNotes.push(JSON.parse(JSON.stringify(note)));
+                    }
+                }
+            }
+
+            if (extractedNotes.length === 0) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "指定範囲内に保管するスライドが見つかりませんでした。";
+            }
+
+            // JSONテキスト化
+            const outText = JSON.stringify(extractedNotes);
+            document.getElementById("exportText").value = outText;
+            exportResult.style.display = "block";
+
+            // ダウンロードリンク生成
+            const blob = new Blob([outText], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            dlLink.href = url;
+            
+            let originalName = file.name.replace(/\.[^/.]+$/, "");
+            dlLink.download = originalName + "_backup.txt";
+            dlLink.style.display = "block";
+
+            msgDiv.style.color = "#28a745";
+            msgDiv.innerHTML = `✅ ${extractedNotes.length} 個のスライドを抽出し、保管データを作成しました！`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = "ファイルの解析に失敗しました。";
+        }
+    };
+    reader.readAsText(file);
+}
+
+function copyExportText() {
+    const text = document.getElementById("exportText");
+    text.select();
+    navigator.clipboard.writeText(text.value).then(() => {
+        alert("クリップボードにコピーしました！");
+    });
+}
+
+// テキストファイルを読み込んで復元エリアに流し込む
+function loadTxtFile() {
+    const fileInput = document.getElementById("txtFile");
+    if (!fileInput.files.length) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        document.getElementById("restoreText").value = e.target.result.trim();
+    };
+    reader.readAsText(fileInput.files[0]);
+}
+
+// ==========================================
+// 復元モード (Restore)
+// ==========================================
+function restoreData() {
+    const fileInput = document.getElementById("mcFile");
+    const restoreText = document.getElementById("restoreText").value.trim();
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlRestoreLink");
+    
+    msgDiv.innerHTML = "";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "壊れたmcファイルを選択してください。";
+    }
+    if (!restoreText) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "保管データをテキストエリアに貼り付けるか、ファイルを読み込んでください。";
+    }
+
+    let savedNotes;
+    try {
+        savedNotes = JSON.parse(restoreText);
+        if (!Array.isArray(savedNotes)) throw new Error("配列ではありません");
+    } catch(e) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "保管データの形式が正しくありません。";
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            let cleanStr = e.target.result.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            if (!data.note) throw new Error("note配列が存在しません。");
+
+            let deletedNotes = new Set();
+            let restoredCount = 0;
+
+            for (let sn of savedNotes) {
+                let sPoint = beatToPoint(safeBeat(sn.beat));
+                let sX = sn.x;
+
+                // mcファイルの中から「始点のタイミングとX座標が一致する壊れたスライド」を探し出す
+                for (let n of data.note) {
+                    if (n.seg && !deletedNotes.has(n)) {
+                        if (Math.abs(beatToPoint(safeBeat(n.beat)) - sPoint) < 1e-4 && n.x === sX) {
+                            deletedNotes.add(n); // 削除対象としてマーク
+                        }
+                    }
+                }
+                // 保管してあった無傷のノーツを追加
+                data.note.push(sn);
+                restoredCount++;
+            }
+
+            // 壊れたノーツを除外する
+            data.note = data.note.filter(n => !deletedNotes.has(n));
+
+            // 時間順にソートし直す
+            data.note.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+
+            const outJson = JSON.stringify(data);
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            
+            dlLink.href = url;
+            let originalName = file.name.replace(/\.[^/.]+$/, "");
+            dlLink.download = originalName + "_restored.mc";
+            dlLink.style.display = "block";
+
+            msgDiv.style.color = "#e65100";
+            msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${restoredCount} 個の敷スライドを救出しました！</b>`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = "ファイルの解析に失敗しました。";
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
+
+</body>
+</html>
