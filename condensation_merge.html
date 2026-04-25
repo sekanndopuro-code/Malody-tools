@@ -36,9 +36,9 @@
 <div class="container">
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
-        装飾スライドの描画時間を<b>1/10000 に超圧縮</b>して結合し、「ツールを使う前の見た目が一瞬だけ表示される演出」を生成します。<br>
-        <b>幹スライド本体のseg（逆走・敷スライド含む）は、そのままの形・タイミングで完全に維持されます。</b><br>
-        同時に、<code>effect</code>配列に <b>Scroll: 10000</b>、<b>Scroll: 1</b> (始点+1/5000)、<b>Jump: 999999.0</b> (始点+1/7000) を自動配置します。
+        装飾スライドの描画時間を<b>1/100 に圧縮</b>して幹スライドの軌道上から分岐させ、「一瞬だけ元の模様が見える」超高速演出を生成します。<br>
+        <b>幹が逆走(マイナスseg)していても形は完全に維持されます。</b><br>
+        自動的に、<code>scroll: 100</code>、<code>jump: 99999</code>、<code>scroll: 1</code> を指定のタイミングに配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -50,7 +50,7 @@
         <div class="range-group clearfix" id="range-0">
             <h4>範囲 1</h4>
             <div class="form-group">
-                <label>始点Beat (メインスライドの開始位置など)</label>
+                <label>始点Beat (メイン幹の開始位置など)</label>
                 <input type="text" class="startBeat" placeholder="例: 449, 0, 1">
             </div>
             <div class="form-group">
@@ -164,7 +164,7 @@ function beatAdd(beat1, beat2) {
     return[m, n / g, den / g];
 }
 
-// 圧縮用：Beatを指定した数(divisor)で割る関数
+// 圧縮用：Beatを指定した数(100)で割る関数
 function beatDiv(beat, divisor) {
     if (!beat) return [0, 0, 1];
     const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
@@ -174,12 +174,11 @@ function beatDiv(beat, divisor) {
     let newM = Math.floor(num / den);
     let newN = num % den;
     if (newN === 0) return[newM, 0, 0];
-    const g = gcd(newN, den);
+    let g = Math.abs(gcd(newN, den));
     return[newM, newN / g, den / g];
 }
 
-// 縮合用：超微小ズレに対応するため 分母を9999999(約1000万分の1)に強化
-// ※幹の本来のsegを守るため、配列の後ろからパトロールする
+// 縮合用：重複回避のための微小ズレ付与 (約1000万分の1)
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
@@ -194,10 +193,11 @@ function fixDuplicateSegs(segArray) {
         let newM = m + extraM;
         newNum = newNum % newDen;
         if (newNum === 0) return[newM, 0, 0];
-        let g = Math.abs(gcd(newNum, newDen)); // 負の数対策
+        let g = Math.abs(gcd(newNum, newDen)); 
         return[newM, newNum / g, newDen / g];
     }
 
+    // 幹の本来のタイミングを絶対死守するため、配列の後ろからパトロールする
     for (let i = segArray.length - 1; i >= 0; i--) {
         let segItem = segArray[i];
         let p = beatToPoint(segItem.beat);
@@ -313,13 +313,18 @@ function processMC() {
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
-                // ★幹の本来のsegをそのまま保持★
+                // ★幹スライドの軌道ポイント配列を作成 (逆走対応)★
+                let mainPoints = [ { beat: [0,0,0], point: 0, x: 0 } ];
                 let mainOriginalSegs = mainSlide.seg ||[];
+                
+                for (let s of mainOriginalSegs) {
+                    mainPoints.push({ beat: s.beat, point: beatToPoint(s.beat), x: s.x });
+                }
 
                 let branches = targetSlides.slice(1);
-                let events =[];
+                let branchEvents =[];
                 
-                // 枝の圧縮＆イベント登録
+                // 枝の圧縮＆イベント登録 (1/100)
                 if (branches.length > 0) {
                     for (let i = 0; i < branches.length; i++) {
                         const branch = branches[i];
@@ -330,62 +335,84 @@ function processMC() {
                         // 枝の「本来の」相対時間
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
                         
-                        // 縮合処理: 枝の配置時間を 1/10000 に圧縮
-                        const compOffsetBeat = beatDiv(origOffsetBeat, 10000);
+                        // 縮合処理: 枝の時間を 1/100 に圧縮
+                        const compOffsetBeat = beatDiv(origOffsetBeat, 100);
 
                         let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
-                        let compLastSegBeat = beatDiv(lastSegBeat, 10000);
+                        let compLastSegBeat = beatDiv(lastSegBeat, 100);
                         
-                        // 圧縮された枝の終点の相対Beat
+                        // 圧縮された枝の終点の相対Beat (これが幹からの分岐タイミングになる)
                         let compEndRelBeat = beatAdd(compOffsetBeat, compLastSegBeat);
                         let compEndRelPoint = beatToPoint(compEndRelBeat);
 
-                        events.push({
+                        branchEvents.push({
                             point: compEndRelPoint,
-                            beat: compEndRelBeat,
+                            compEndRelBeat: compEndRelBeat,
                             branchSegs: branchSegs,
                             offsetX: offsetX,
-                            offsetBeat: compOffsetBeat
+                            compOffsetBeat: compOffsetBeat
                         });
                     }
                 }
 
-                // 枝のイベントを時間順にソート (すべて0秒付近に密集する)
-                events.sort((a, b) => a.point - b.point);
+                // 分岐点イベントを時間順にソート (0秒付近に密集)
+                branchEvents.sort((a, b) => a.point - b.point);
 
                 const newSeg =[];
-                
-                // 枝の一筆書き生成 (常に幹の基準座標 x:0 からスタート)
-                for (let ev of events) {
-                    newSeg.push({ beat: [...ev.beat], x: 0 }); 
+                let currentMainIdx = 0;
 
-                    // 復路 (圧縮して追加)
-                    for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
-                        let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 10000);
-                        newSeg.push({ beat: beatAdd(ev.offsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                // ★新ロジック：幹のsegを順になぞりながら、枝の分岐点を挟み込んでいく★
+                for (let ev of branchEvents) {
+                    // 幹のパスを進め、枝の分岐タイミング (ev.point) が含まれる区間を探す
+                    while (currentMainIdx < mainPoints.length - 1) {
+                        let p1 = mainPoints[currentMainIdx];
+                        let p2 = mainPoints[currentMainIdx + 1];
+                        let minP = Math.min(p1.point, p2.point);
+                        let maxP = Math.max(p1.point, p2.point);
+
+                        if (minP - 1e-10 <= ev.point && ev.point <= maxP + 1e-10) {
+                            // この区間に分岐点が含まれている！
+                            // 線形補間で分岐点のX座標を計算
+                            let t = 0;
+                            if (Math.abs(p2.point - p1.point) > 1e-10) {
+                                t = (ev.point - p1.point) / (p2.point - p1.point);
+                            }
+                            let trunkX = p1.x + (p2.x - p1.x) * t;
+
+                            // 1. 幹の現在地から分岐するためのsegを打つ
+                            newSeg.push({ beat: ev.compEndRelBeat, x: Math.floor(trunkX) });
+
+                            // 2. 枝の往復ブロック (復路 → 始点 → 往路) を圧縮して描画
+                            for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
+                                let s = ev.branchSegs[j];
+                                let compSegBeat = beatDiv(s.beat, 100);
+                                newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                            }
+                            newSeg.push({ beat: ev.compOffsetBeat, x: ev.offsetX });
+                            for (let j = 0; j < ev.branchSegs.length; j++) {
+                                let s = ev.branchSegs[j];
+                                let compSegBeat = beatDiv(s.beat, 100);
+                                newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                            }
+
+                            // 3. 幹の座標に帰還する
+                            newSeg.push({ beat: ev.compEndRelBeat, x: Math.floor(trunkX) });
+
+                            break; // 枝を描き終わったので次の枝へ
+                        } else {
+                            // この区間には無いため、区間の終点(幹の通常のseg)を追加して次へ
+                            currentMainIdx++;
+                            newSeg.push({ beat: p2.beat, x: p2.x });
+                        }
                     }
-                    
-                    // 始点
-                    newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
-
-                    // 往路 (圧縮して追加)
-                    for (let j = 0; j < ev.branchSegs.length; j++) {
-                        let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 10000);
-                        newSeg.push({ beat: beatAdd(ev.offsetBeat, compSegBeat), x: ev.offsetX + s.x });
-                    }
-
-                    // 幹の基準座標(0)に戻る
-                    newSeg.push({ beat: [...ev.beat], x: 0 }); 
                 }
 
-                // ★幹スライド本体のsegを、圧縮せずにそのままの形・タイミングで最後にくっつける★
-                for (let s of mainOriginalSegs) {
-                    newSeg.push(JSON.parse(JSON.stringify(s)));
+                // 全ての枝を描き終わったら、残っている幹の本来のsegを最後まで追加する
+                for (let i = currentMainIdx + 1; i < mainPoints.length; i++) {
+                    newSeg.push({ beat: mainPoints[i].beat, x: mainPoints[i].x });
                 }
 
-                // パトロールを実行 (幹のsegを保護するため後ろから走査し、枝だけを極小にズラす)
+                // 重複パトロール (幹の形とタイミングを完璧に守るため、微小ズレのみ付与)
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
@@ -395,22 +422,22 @@ function processMC() {
                 
                 totalJoinedCount += targetSlides.length;
                 let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を1万分の1縮合結合しました${fixMsg}</span>`);
+                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
 
                 // ==========================================
                 // ★ ScrollエフェクトとJumpエフェクトの自動配置 ★
                 // ==========================================
-                // 1. Scroll: 10000 (始点 + 1/99990000)
-                let scroll1Beat = beatAdd(mainBeat,[0, 1, 99990000]);
-                data.effect.push({ beat: scroll1Beat, scroll: 10000 });
+                // 1. Scroll: 100 (始点 + 1/99999)
+                let scroll1Beat = beatAdd(mainBeat, [0, 1, 99999]);
+                data.effect.push({ beat: scroll1Beat, scroll: 100 });
 
-                // 2. Scroll: 1 (始点 + 1/5000)
-                let scroll2Beat = beatAdd(mainBeat,[0, 1, 5000]);
+                // 2. Jump: 99999 (始点 + 1/75)
+                let jumpBeat = beatAdd(mainBeat, [0, 1, 75]);
+                data.effect.push({ beat: jumpBeat, jump: 99999 });
+
+                // 3. Scroll: 1 (始点 + 1/50)
+                let scroll2Beat = beatAdd(mainBeat,[0, 1, 50]);
                 data.effect.push({ beat: scroll2Beat, scroll: 1 });
-
-                // 3. Jump: 999999.0 (始点 + 1/2000)
-                let jumpBeat = beatAdd(mainBeat,[0, 1, 7000]);
-                data.effect.push({ beat: jumpBeat, jump: 999999.0 });
             }
 
             if (totalJoinedCount === 0) {
