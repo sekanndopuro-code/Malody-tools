@@ -12,10 +12,15 @@
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
         input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        textarea.beatList { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; font-family: monospace; resize: vertical; }
         
-        .radio-group { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbdefb; }
+        .radio-group { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #bbdefb; }
         .radio-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
         .radio-group label:last-child { margin-bottom: 0; }
+        
+        .mode-group { background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffe0b2; }
+        .mode-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
+        .mode-group label:last-child { margin-bottom: 0; }
         
         .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
         .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
@@ -41,8 +46,8 @@
 <div class="container">
     <h1>🔗 直列マージツール</h1>
     <p class="desc">
-        範囲内にあるすべてのノーツを時間順に並べ、<b>1つの連続したスライド</b>に結合します。<br>
-        2番目以降の始点も中継点として組み込まれます。同じタイミングに配置して直角スライドを作る場合も、1万分の1ずらしで自動補正されます。
+        選択されたノーツを時間順に並べ、<b>1つの連続したスライド</b>に結合します。<br>
+        ※直角スライド等で同じタイミングにノーツが重なった場合でも、1万分の1ずらしで自動補正されます。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -50,7 +55,7 @@
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
-    <!-- ★ ノーツのターゲット設定 ★ -->
+    <!-- 結合対象のノーツ種別 -->
     <div class="radio-group">
         <label style="font-weight: bold; margin-bottom: 10px; color: #0d47a1;">🎯 結合対象にするノーツ</label>
         <label>
@@ -61,22 +66,24 @@
         </label>
     </div>
 
-    <div id="rangesContainer">
-        <div class="range-group clearfix" id="range-0">
-            <h4>範囲 1</h4>
-            <div class="form-group">
-                <label>始点Beat</label>
-                <input type="text" class="startBeat" placeholder="例: 10, 0, 1">
-            </div>
-            <div class="form-group">
-                <label>終点Beat</label>
-                <input type="text" class="endBeat" placeholder="例: 15, 0, 0">
-            </div>
-            <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
-        </div>
+    <!-- 選択方式の切り替え -->
+    <div class="mode-group">
+        <label style="font-weight: bold; margin-bottom: 10px; color: #e65100;">⚙️ ノーツの選択方式</label>
+        <label>
+            <input type="radio" name="selectMode" value="range" checked onchange="switchMode()"> <b>範囲指定</b>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定した始点から終点の間にあるすべてのノーツを結合します。</span>
+        </label>
+        <label style="margin-top: 5px;">
+            <input type="radio" name="selectMode" value="exact" onchange="switchMode()"> <b>タイミング完全指定</b>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定した「特定のBeat上」にあるノーツのみを結合します。</span>
+        </label>
     </div>
 
-    <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    <div id="rangesContainer">
+        <!-- JSでボックスが挿入されます -->
+    </div>
+
+    <button type="button" class="btn-add" onclick="addRange()">➕ 結合グループを追加する</button>
     <button type="button" class="btn-process" onclick="processMC()">✨ 直列マージを実行</button>
 
     <div id="resultMsg"></div>
@@ -85,24 +92,53 @@
 
 <script>
 let rangeIdCounter = 1;
+let currentMode = "range";
+
+// 初回読み込み時に表示
+window.onload = function() {
+    addRange();
+};
+
+function switchMode() {
+    currentMode = document.querySelector('input[name="selectMode"]:checked').value;
+    document.getElementById("rangesContainer").innerHTML = "";
+    rangeIdCounter = 1;
+    addRange();
+}
 
 function addRange() {
     const container = document.getElementById("rangesContainer");
-    const id = "range-" + rangeIdCounter++;
-    const html = `
-    <div class="range-group clearfix" id="${id}">
-        <h4>範囲指定</h4>
-        <div class="form-group">
-            <label>始点Beat</label>
-            <input type="text" class="startBeat" placeholder="例: 10, 0, 1">
+    const id = "group-" + rangeIdCounter++;
+    
+    let html = "";
+    if (currentMode === "range") {
+        html = `
+        <div class="range-group clearfix" id="${id}">
+            <h4>結合グループ 1</h4>
+            <div class="form-group">
+                <label>始点Beat</label>
+                <input type="text" class="startBeat" placeholder="例: 10, 0, 1">
+            </div>
+            <div class="form-group">
+                <label>終点Beat</label>
+                <input type="text" class="endBeat" placeholder="例: 15, 0, 0">
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
         </div>
-        <div class="form-group">
-            <label>終点Beat</label>
-            <input type="text" class="endBeat" placeholder="例: 15, 0, 0">
+        `;
+    } else {
+        html = `
+        <div class="range-group clearfix" id="${id}">
+            <h4>結合グループ 1</h4>
+            <div class="form-group">
+                <label>対象のBeat (1行に1つずつ入力)</label>
+                <textarea class="beatList" rows="4" placeholder="例:\n10, 0, 1\n10, 0, 1\n11, 0, 1\n12, 1, 4"></textarea>
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
         </div>
-        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
-    </div>
-    `;
+        `;
+    }
+    
     container.insertAdjacentHTML('beforeend', html);
     updateRangeLabels();
 }
@@ -110,7 +146,7 @@ function addRange() {
 function removeRange(id) {
     const container = document.getElementById("rangesContainer");
     if (container.children.length <= 1) {
-        alert("最低でも1つの範囲指定が必要です！");
+        alert("最低でも1つの結合グループが必要です！");
         return;
     }
     document.getElementById(id).remove();
@@ -120,7 +156,7 @@ function removeRange(id) {
 function updateRangeLabels() {
     const groups = document.querySelectorAll('.range-group h4');
     groups.forEach((el, index) => {
-        el.innerText = `範囲 ${index + 1}`;
+        el.innerText = `結合グループ ${index + 1}`;
     });
 }
 
@@ -158,7 +194,7 @@ function beatAdd(beat1, beat2) {
     let n = num % den;
     if (n === 0) return [m, 0, 0];
     const g = gcd(n, den);
-    return [m, n / g, den / g];
+    return[m, n / g, den / g];
 }
 
 function beatSub(beat1, beat2) {
@@ -169,19 +205,17 @@ function beatSub(beat1, beat2) {
     const num2 = (m2 * d2 + n2) * d1;
     const den = d1 * d2;
     let diffNum = num1 - num2;
-    // メインスライドの始点より手前に来ることはない前提だが、念のため0でストッパー
     if (diffNum < 0) diffNum = 0; 
     const m = Math.floor(diffNum / den);
     const n = diffNum % den;
-    if (n === 0) return [m, 0, 0];
+    if (n === 0) return[m, 0, 0];
     const g = gcd(n, den);
     return[m, n / g, den / g];
 }
 
 // 完全にダブるBeatを1万分の1ずらしてバグを回避するパトロール関数
 function fixDuplicateSegs(segArray) {
-    // メインスライドの始点(相対[0,0,0])が既に存在するため、初期値として0を入れておく
-    let usedPoints = [0]; 
+    let usedPoints = [0]; // 始点(0,0,0)は常に存在するため最初から登録
     let fixedCount = 0;
     const MICRO_DEN = 10000; 
     
@@ -198,7 +232,6 @@ function fixDuplicateSegs(segArray) {
         return[newM, newNum / g, newDen / g];
     }
 
-    // 前から走査して順次ずらしていく（直角スライドの描画順序を保つため）
     for (let i = 0; i < segArray.length; i++) {
         let segItem = segArray[i];
         let p = beatToPoint(segItem.beat);
@@ -233,6 +266,8 @@ function processMC() {
     const fileInput = document.getElementById("mcFile");
     const targetWipe = document.getElementById("targetWipe").checked;
     const targetTap = document.getElementById("targetTap").checked;
+    const selectMode = document.querySelector('input[name="selectMode"]:checked').value;
+    
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
     
@@ -250,26 +285,46 @@ function processMC() {
     }
 
     const rangeGroups = document.querySelectorAll('.range-group');
-    const ranges =[];
+    const parsedGroups =[];
     
+    // 入力データの解析
     for (let i = 0; i < rangeGroups.length; i++) {
-        const startStr = rangeGroups[i].querySelector('.startBeat').value;
-        const endStr = rangeGroups[i].querySelector('.endBeat').value;
-        const startBeat = parseBeat(startStr);
-        const endBeat = parseBeat(endStr);
+        let groupObj = { index: i + 1, type: selectMode };
         
-        if (!startBeat || !endBeat) {
-            msgDiv.style.color = "#d32f2f";
-            return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
+        if (selectMode === "range") {
+            const startStr = rangeGroups[i].querySelector('.startBeat').value;
+            const endStr = rangeGroups[i].querySelector('.endBeat').value;
+            const startBeat = parseBeat(startStr);
+            const endBeat = parseBeat(endStr);
+            
+            if (!startBeat || !endBeat) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = `⚠️ 結合グループ ${i + 1} のBeatフォーマットが正しくありません。`;
+            }
+            const startPoint = beatToPoint(startBeat);
+            const endPoint = beatToPoint(endBeat);
+            groupObj.min = Math.min(startPoint, endPoint);
+            groupObj.max = Math.max(startPoint, endPoint);
+            
+        } else {
+            const textStr = rangeGroups[i].querySelector('.beatList').value;
+            const lines = textStr.split('\n');
+            const points =[];
+            
+            for (let line of lines) {
+                if (line.trim() === "") continue;
+                let b = parseBeat(line);
+                if (b) {
+                    points.push(beatToPoint(b));
+                }
+            }
+            if (points.length < 2) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = `⚠️ 結合グループ ${i + 1} で指定された有効なBeatが2つ未満です。改行して2つ以上入力してください。`;
+            }
+            groupObj.points = points;
         }
-        
-        const startPoint = beatToPoint(startBeat);
-        const endPoint = beatToPoint(endBeat);
-        ranges.push({
-            index: i + 1,
-            min: Math.min(startPoint, endPoint),
-            max: Math.max(startPoint, endPoint)
-        });
+        parsedGroups.push(groupObj);
     }
 
     const file = fileInput.files[0];
@@ -290,11 +345,11 @@ function processMC() {
             let totalJoinedCount = 0;
             let logTexts =[];
 
-            for (let r = 0; r < ranges.length; r++) {
-                const range = ranges[r];
+            for (let r = 0; r < parsedGroups.length; r++) {
+                const group = parsedGroups[r];
                 const targetNotes =[];
 
-                // 範囲内のノーツを抽出
+                // グループ条件に合致するノーツを抽出
                 for (let i = 0; i < notes.length; i++) {
                     const note = notes[i];
                     if (allDeletedNotes.has(note)) continue;
@@ -308,35 +363,57 @@ function processMC() {
 
                         if (isTarget) {
                             const point = beatToPoint(safeBeat(note.beat));
-                            if (point >= range.min - 0.001 && point <= range.max + 0.001) {
-                                targetNotes.push(note);
+                            
+                            if (group.type === "range") {
+                                if (point >= group.min - 0.001 && point <= group.max + 0.001) {
+                                    note._origIdx = i; // 同じ時間になった時の並び替え保護用
+                                    targetNotes.push(note);
+                                }
+                            } else {
+                                // タイミング完全指定 (分数約分の違いもここで吸収して一致判定)
+                                let match = false;
+                                for (let p of group.points) {
+                                    if (Math.abs(point - p) < 1e-5) {
+                                        match = true;
+                                        break;
+                                    }
+                                }
+                                if (match) {
+                                    note._origIdx = i;
+                                    targetNotes.push(note);
+                                }
                             }
                         }
                     }
                 }
 
                 if (targetNotes.length < 2) {
-                    logTexts.push(`<span style="color:#d32f2f;">⚠️ 範囲 ${range.index}: 対象ノーツが2つ未満のためスキップ</span>`);
+                    logTexts.push(`<span style="color:#d32f2f;">⚠️ グループ ${group.index}: 対象ノーツが2つ未満のためスキップ</span>`);
                     continue;
                 }
 
-                // 1. ノーツを時間が早い順にソートする
-                targetNotes.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+                // 1. ノーツを時間が早い順にソート。同じ時間なら入力(配置)された順番を保持する
+                targetNotes.sort((a, b) => {
+                    let pA = beatToPoint(safeBeat(a.beat));
+                    let pB = beatToPoint(safeBeat(b.beat));
+                    if (Math.abs(pA - pB) > 1e-5) {
+                        return pA - pB;
+                    }
+                    return a._origIdx - b._origIdx;
+                });
                 
                 // メインとなる最初のノーツ
                 const mainSlide = targetNotes[0];
                 const mainBeat = safeBeat(mainSlide.beat);
                 const mainX = mainSlide.x;
 
-                let absPoints =[]; // 絶対座標と絶対Beatを格納する配列
+                let absPoints =[]; 
 
-                // メインノーツが既にsegを持っていれば追加
                 if (mainSlide.seg && Array.isArray(mainSlide.seg)) {
                     for (let s of mainSlide.seg) {
                         absPoints.push({
                             beat: beatAdd(mainBeat, s.beat),
-                            x: mainX + s.x,
-                            origIndex: absPoints.length
+                            x: mainX + s.x
                         });
                     }
                 }
@@ -347,38 +424,18 @@ function processMC() {
                     let nBeat = safeBeat(note.beat);
                     let nX = note.x;
 
-                    // 始点もseg(中継点)として追加
-                    absPoints.push({
-                        beat: nBeat,
-                        x: nX,
-                        origIndex: absPoints.length
-                    });
+                    absPoints.push({ beat: nBeat, x: nX });
 
-                    // そのノーツがsegを持っていれば追加
                     if (note.seg && Array.isArray(note.seg)) {
                         for (let s of note.seg) {
-                            absPoints.push({
-                                beat: beatAdd(nBeat, s.beat),
-                                x: nX + s.x,
-                                origIndex: absPoints.length
-                            });
+                            absPoints.push({ beat: beatAdd(nBeat, s.beat), x: nX + s.x });
                         }
                     }
                 }
 
-                // すべての点を時間順にソート。同じ時間なら入力された順番を保持する(直角スライド用)
-                absPoints.sort((a, b) => {
-                    let pA = beatToPoint(a.beat);
-                    let pB = beatToPoint(b.beat);
-                    if (Math.abs(pA - pB) > 1e-6) {
-                        return pA - pB;
-                    }
-                    return a.origIndex - b.origIndex;
-                });
-
                 let newSeg =[];
                 
-                // メインからの「相対Beat」「相対X座標」に変換してnewSegに格納
+                // メインからの「相対Beat」「相対X座標」に変換
                 for (let p of absPoints) {
                     newSeg.push({
                         beat: beatSub(p.beat, mainBeat),
@@ -395,13 +452,13 @@ function processMC() {
                 }
 
                 totalJoinedCount += targetNotes.length;
-                let fixMsg = fixCount > 0 ? ` (直角スライド等の重複 ${fixCount}箇所を自動補正✨)` : "";
-                logTexts.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetNotes.length}個のノーツを1つに結合しました${fixMsg}</span>`);
+                let fixMsg = fixCount > 0 ? ` (重複 ${fixCount}箇所を自動補正✨)` : "";
+                logTexts.push(`<span style="color:#28a745;">✅ グループ ${group.index}: ${targetNotes.length}個のノーツを結合しました${fixMsg}</span>`);
             }
 
             if (totalJoinedCount === 0) {
                 msgDiv.style.color = "#d32f2f";
-                return msgDiv.innerHTML = "指定された範囲内に結合可能なノーツが見つかりませんでした。";
+                return msgDiv.innerHTML = "指定された条件で結合可能なノーツが見つかりませんでした。";
             }
 
             data.note = data.note.filter(n => !allDeletedNotes.has(n));
