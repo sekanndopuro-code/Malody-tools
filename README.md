@@ -6,7 +6,7 @@
 https://sekanndopuro-code.github.io/Malody-tools/
 
 
-終点位置に応じて分岐し時系列順に繋げていく方。仕様上装飾スライドは二重になっちゃう
+終点位置に応じて分岐して繋げていく方。仕様上装飾スライドは二重になっちゃう
 
 https://sekanndopuro-code.github.io/Malody-tools/segmismatch
 
