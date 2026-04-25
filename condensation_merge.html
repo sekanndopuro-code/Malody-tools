@@ -38,7 +38,7 @@
     <p class="desc">
         装飾スライドの描画時間を<b>1/10000 に超圧縮</b>して結合し、「ツールを使う前の見た目が一瞬だけ表示される演出」を生成します。<br>
         <b>幹スライド本体のseg（逆走・敷スライド含む）は、そのままの形・タイミングで完全に維持されます。</b><br>
-        同時に、<code>effect</code>配列に <b>Scroll: 10000</b>、<b>Scroll: 1</b> (始点+1/5000)、<b>Jump: 999999.0</b> (始点+1/2000) を自動配置します。
+        同時に、<code>effect</code>配列に <b>Scroll: 10000</b>、<b>Scroll: 1</b> (始点+1/5000)、<b>Jump: 999999.0</b> (始点+1/7000) を自動配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -409,7 +409,7 @@ function processMC() {
                 data.effect.push({ beat: scroll2Beat, scroll: 1 });
 
                 // 3. Jump: 999999.0 (始点 + 1/2000)
-                let jumpBeat = beatAdd(mainBeat,[0, 1, 2000]);
+                let jumpBeat = beatAdd(mainBeat,[0, 1, 7000]);
                 data.effect.push({ beat: jumpBeat, jump: 999999.0 });
             }
 
