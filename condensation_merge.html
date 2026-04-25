@@ -36,7 +36,7 @@
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
         装飾スライドの描画時間を<b>1/100 に圧縮</b>して幹スライドの軌道上から分岐させ、「一瞬だけ元の模様が見える」超高速演出を生成します。<br>
-        <b>幹 → 枝始点 → 往路 → 終点 → 復路 → 枝始点 → 幹 の順に正しく往復します。</b><br>
+        <b>時間を巻き戻して分かれ道に帰還するギミックが完全動作します。</b><br>
         自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
@@ -131,7 +131,7 @@ function parseBeat(str) {
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function beatDiff(beat1, beat2) {
-    if (!beat1) return [0, 0, 0];
+    if (!beat1) return[0, 0, 0];
     if (!beat2) return [...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
@@ -176,11 +176,10 @@ function beatDiv(beat, divisor) {
     return[newM, newN / g, den / g];
 }
 
-// ★修正版：配列の順番に沿って「絶対に逆行させない」パトロール
+// ★修正版：時間の巻き戻り(逆行)を許容する正しいパトロール
 function fixDuplicateSegs(segArray) {
     let fixedCount = 0;
-    // 分母を10000にし、ゲームエンジンに無視されない程度の微小なズレを作る
-    const MICRO_DEN = 10000; 
+    const MICRO_DEN = 9999999; 
 
     function addMicroOffset(beat, offsetCount) {
         if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
@@ -190,46 +189,37 @@ function fixDuplicateSegs(segArray) {
         let extraM = Math.floor(newNum / newDen);
         let newM = m + extraM;
         newNum = newNum % newDen;
-        if (newNum === 0) return [newM, 0, 0];
+        if (newNum === 0) return[newM, 0, 0];
         let g = Math.abs(gcd(newNum, newDen)); 
-        return[newM, newNum / g, newDen / g];
+        return [newM, newNum / g, newDen / g];
     }
 
-    let lastPoint = -1;
     let usedPoints =[];
 
-    // 幹の時間は絶対死守
+    // 1. 幹の本来のタイミング(isMain)を絶対死守するため、先に予約する
     for (let i = 0; i < segArray.length; i++) {
         if (segArray[i].isMain) {
             usedPoints.push(beatToPoint(segArray[i].beat));
         }
     }
 
-    // 配列の「前」から順番にパトロール。配列の並び順＝時間の順序を強制する
+    // 2. 配列の「前」から順番にパトロール。重複していた場合のみ未来へ押し出す
     for (let i = 0; i < segArray.length; i++) {
         let segItem = segArray[i];
-        let p = beatToPoint(segItem.beat);
-
         if (segItem.isMain) {
-            lastPoint = p;
-            delete segItem.isMain;
+            delete segItem.isMain; // 確保済みなのでスルー
             continue;
         }
 
+        let p = beatToPoint(segItem.beat);
         let conflictCount = 0;
         let currentP = p;
 
-        // もし直前のポイントより時間が戻っていたら（または同じなら）、強制的に少し未来へ進める
-        if (currentP <= lastPoint) {
-            conflictCount = Math.floor((lastPoint - p) * MICRO_DEN) + 1;
-            currentP = p + (conflictCount / MICRO_DEN);
-        }
-
-        // さらに、usedPoints(幹の予約時間など)と被らないようにする
+        // 完全に同じ時間(重複)のみを回避する。時間が戻っていること自体は許容する！
         while (true) {
             let isConflict = false;
             for (let j = 0; j < usedPoints.length; j++) {
-                if (Math.abs(currentP - usedPoints[j]) < 1e-8) {
+                if (Math.abs(currentP - usedPoints[j]) < 1e-10) {
                     isConflict = true;
                     break;
                 }
@@ -245,7 +235,6 @@ function fixDuplicateSegs(segArray) {
         }
 
         usedPoints.push(currentP);
-        lastPoint = currentP;
         delete segItem.isBranch; // クリーンアップ
     }
 
@@ -358,15 +347,11 @@ function processMC() {
                         const offsetX = branchX - mainX;
                         
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
+                        // 1/100に圧縮し、[0, 1, 99] を加算してずらす
                         const compOffsetBeat = beatAdd(beatDiv(origOffsetBeat, 100), shiftBaseBeat);
-
-                        let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
-                        let compLastSegBeat = beatDiv(lastSegBeat, 100);
-                        let compEndRelBeat = beatAdd(compOffsetBeat, compLastSegBeat);
 
                         branchEvents.push({
                             compOffsetBeat: compOffsetBeat,
-                            compEndRelBeat: compEndRelBeat,
                             branchSegs: branchSegs,
                             offsetX: offsetX
                         });
@@ -381,7 +366,6 @@ function processMC() {
 
                 for (let ev of branchEvents) {
                     let evStart = beatToPoint(ev.compOffsetBeat);
-                    let evEnd = beatToPoint(ev.compEndRelBeat);
 
                     // 枝のタイミングまでに存在する幹のsegを追加
                     while (currentMainIdx < mainPoints.length - 1) {
@@ -394,46 +378,38 @@ function processMC() {
                         }
                     }
 
-                    // 幹のX座標を計算
+                    // 枝の始点時間(帰還時間でもある)における幹のX座標を計算
                     let p1 = mainPoints[currentMainIdx];
                     let p2 = currentMainIdx < mainPoints.length - 1 ? mainPoints[currentMainIdx + 1] : p1;
-                    
                     let tStart = 0;
                     if (Math.abs(p2.point - p1.point) > 1e-10) {
                         tStart = (evStart - p1.point) / (p2.point - p1.point);
                     }
                     let trunkX_start = p1.x + (p2.x - p1.x) * tStart;
 
-                    let tEnd = 0;
-                    if (Math.abs(p2.point - p1.point) > 1e-10) {
-                        tEnd = (evEnd - p1.point) / (p2.point - p1.point);
-                    }
-                    let trunkX_end = p1.x + (p2.x - p1.x) * tEnd;
-
-                    // ★ ご指摘通り「幹 → 枝の始点 → 枝の往路 → 枝の終点 → 枝の復路 → 枝の始点 → 幹」の順にプッシュする
+                    // ★「幹 → 枝の始点 → 枝の往路 → 枝の復路(時間逆行) → 枝の始点 → 幹」★
                     
-                    // 1. 幹 → 枝の始点
+                    // 1. 幹 → 枝の始点 (時間は始点)
                     newSeg.push({ beat: ev.compOffsetBeat, x: Math.floor(trunkX_start), isBranch: true });
                     newSeg.push({ beat: ev.compOffsetBeat, x: ev.offsetX, isBranch: true });
 
-                    // 2. 枝の往路
+                    // 2. 枝の往路 (時間は始点から進む)
                     for (let j = 0; j < ev.branchSegs.length; j++) {
                         let s = ev.branchSegs[j];
                         let compSegBeat = beatDiv(s.beat, 100);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x, isBranch: true });
                     }
 
-                    // 3. 枝の復路 (往路を逆からなぞる。終点は上で打たれているのでその手前から)
-                    for (let j = ev.branchSegs.length - 2; j >= 0; j--) {
+                    // 3. 枝の復路 (時間は巻き戻る)
+                    for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
                         let s = ev.branchSegs[j];
-                        newSeg.push({ beat: ev.compEndRelBeat, x: ev.offsetX + s.x, isBranch: true });
+                        let compSegBeat = beatDiv(s.beat, 100);
+                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x, isBranch: true });
                     }
 
-                    // 4. 枝の始点 → 幹
-                    if (ev.branchSegs.length > 0) {
-                        newSeg.push({ beat: ev.compEndRelBeat, x: ev.offsetX, isBranch: true });
-                    }
-                    newSeg.push({ beat: ev.compEndRelBeat, x: Math.floor(trunkX_end), isBranch: true });
+                    // 4. 枝の始点 → 幹 (時間は始点に戻る)
+                    newSeg.push({ beat: ev.compOffsetBeat, x: ev.offsetX, isBranch: true });
+                    newSeg.push({ beat: ev.compOffsetBeat, x: Math.floor(trunkX_start), isBranch: true });
                 }
 
                 // 残りの幹segを最後まで追加
@@ -441,7 +417,7 @@ function processMC() {
                     newSeg.push({ beat: mainPoints[i].beat, x: mainPoints[i].x, isMain: true });
                 }
 
-                // パトロール実行 (逆行しないように前から押し出す)
+                // パトロール実行
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
@@ -450,13 +426,13 @@ function processMC() {
                 }
                 
                 totalJoinedCount += targetSlides.length;
-                let fixMsg = fixCount > 0 ? ` (微小ズレ・逆行回避 ${fixCount}箇所✨)` : "";
+                let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
                 resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
 
                 // ==========================================
                 // ★ エフェクトの配置 (ご指定のタイミング)
                 // ==========================================
-                let scroll1Beat = beatAdd(mainBeat, [0, 1, 99]);
+                let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
                 data.effect.push({ beat: scroll1Beat, scroll: 100 });
 
                 let jumpBeat = beatAdd(mainBeat,[0, 1, 4]);
