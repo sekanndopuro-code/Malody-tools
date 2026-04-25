@@ -33,8 +33,11 @@
         .btn-copy:hover { background: #5a6268; }
         
         .clearfix::after { content: ""; clear: both; display: table; }
-        .dl-link { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
+        .dl-link { display: none; margin-top: 15px; text-align: center; padding: 15px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
         .dl-link:hover { background: #218838; }
+        .dl-link.secondary { background: #e91e63; box-shadow: 0 4px 6px rgba(233, 30, 99, 0.3); }
+        .dl-link.secondary:hover { background: #c2185b; }
+        
         #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
         textarea { width: 100%; height: 120px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 0.85em; resize: vertical; }
     </style>
@@ -44,7 +47,8 @@
 <div class="container">
     <h1>🛡️ 敷スライド保管ツール</h1>
     <p class="desc">
-        Malody Vの自動ソートによって破壊されてしまう「敷スライド(逆走スライド)」をテキストとして保管し、いつでも元の状態に復元できる命綱ツールです。
+        自動ソートによって破壊されてしまう「敷スライド(逆走スライド)」をテキストとして保管し、いつでも元の状態に復元できる命綱ツールです。<br>
+        保管時に、<b>敷スライドを削除してエディタの動作を軽くしたmcファイル</b>も同時に出力できます。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -57,11 +61,11 @@
         <label style="font-weight: bold; margin-bottom: 10px; color: #0d47a1;">⚙️ モード選択</label>
         <label>
             <input type="radio" name="toolMode" value="export" checked onchange="switchMode()"> <b>💾 保管モード (Export)</b>
-            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定範囲内のスライドを抽出し、復元用のテキストデータを作ります。</span>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定範囲内のスライドを抽出し、復元用テキストと軽量化されたmcデータを作ります。</span>
         </label>
         <label style="margin-top: 5px;">
             <input type="radio" name="toolMode" value="restore" onchange="switchMode()"> <b>🛠️ 復元モード (Restore)</b>
-            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">壊れたmcファイルに、保管したデータを上書きして修復します。</span>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">壊れた、またはスライドを削除したmcファイルに、保管データを上書きして完全修復します。</span>
         </label>
     </div>
 
@@ -85,10 +89,11 @@
         <button type="button" class="btn-export" onclick="exportData()">💾 保管データを生成</button>
 
         <div id="exportResult" style="display:none; margin-top: 20px;">
-            <label style="color: #007bff;">📋 抽出された保管データ (コピーしてメモ帳等に保存)</label>
+            <label style="color: #007bff;">📋 抽出された保管データ</label>
             <textarea id="exportText" readonly></textarea>
             <button type="button" class="btn-copy" onclick="copyExportText()">📋 テキストをコピー</button>
-            <a id="dlExportLink" class="dl-link" href="#">💾 .txt ファイルとしてダウンロード</a>
+            <a id="dlExportTxtLink" class="dl-link" href="#">💾 保管データ (.txt) をダウンロード</a>
+            <a id="dlExportMcLink" class="dl-link secondary" href="#">💾 敷スライドを削除した軽量譜面 (.mc) をダウンロード</a>
         </div>
     </div>
 
@@ -175,7 +180,7 @@ function parseBeat(str) {
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
@@ -187,11 +192,13 @@ function exportData() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const exportResult = document.getElementById("exportResult");
-    const dlLink = document.getElementById("dlExportLink");
+    const txtLink = document.getElementById("dlExportTxtLink");
+    const mcLink = document.getElementById("dlExportMcLink");
     
     msgDiv.innerHTML = "";
     exportResult.style.display = "none";
-    dlLink.style.display = "none";
+    txtLink.style.display = "none";
+    mcLink.style.display = "none";
 
     if (!fileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
@@ -223,6 +230,7 @@ function exportData() {
             if (!data.note) throw new Error("note配列が存在しません。");
 
             const extractedNotes =[];
+            const notesToDelete = new Set();
 
             for (let note of data.note) {
                 // スライド(segあり)のみを抽出対象とする
@@ -237,6 +245,7 @@ function exportData() {
                     if (inRange) {
                         // オブジェクトのディープコピーを保存
                         extractedNotes.push(JSON.parse(JSON.stringify(note)));
+                        notesToDelete.add(note);
                     }
                 }
             }
@@ -246,19 +255,24 @@ function exportData() {
                 return msgDiv.innerHTML = "指定範囲内に保管するスライドが見つかりませんでした。";
             }
 
-            // JSONテキスト化
+            // 1. JSONテキスト化 (.txt 用)
             const outText = JSON.stringify(extractedNotes);
             document.getElementById("exportText").value = outText;
             exportResult.style.display = "block";
 
-            // ダウンロードリンク生成
-            const blob = new Blob([outText], { type: "text/plain" });
-            const url = URL.createObjectURL(blob);
-            dlLink.href = url;
-            
+            const blobTxt = new Blob([outText], { type: "text/plain" });
+            txtLink.href = URL.createObjectURL(blobTxt);
             let originalName = file.name.replace(/\.[^/.]+$/, "");
-            dlLink.download = originalName + "_backup.txt";
-            dlLink.style.display = "block";
+            txtLink.download = originalName + "_backup.txt";
+            txtLink.style.display = "block";
+
+            // 2. 敷スライドを削除した .mc データを生成
+            data.note = data.note.filter(n => !notesToDelete.has(n));
+            const outMcStr = JSON.stringify(data);
+            const blobMc = new Blob([outMcStr], { type: "application/octet-stream" });
+            mcLink.href = URL.createObjectURL(blobMc);
+            mcLink.download = originalName + "_light.mc";
+            mcLink.style.display = "block";
 
             msgDiv.style.color = "#28a745";
             msgDiv.innerHTML = `✅ ${extractedNotes.length} 個のスライドを抽出し、保管データを作成しました！`;
@@ -277,6 +291,8 @@ function copyExportText() {
     text.select();
     navigator.clipboard.writeText(text.value).then(() => {
         alert("クリップボードにコピーしました！");
+    }).catch(() => {
+        alert("コピーに失敗しました。手動でコピーしてください。");
     });
 }
 
@@ -305,7 +321,7 @@ function restoreData() {
 
     if (!fileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
-        return msgDiv.innerHTML = "壊れたmcファイルを選択してください。";
+        return msgDiv.innerHTML = "mcファイルを選択してください。";
     }
     if (!restoreText) {
         msgDiv.style.color = "#d32f2f";
@@ -336,11 +352,11 @@ function restoreData() {
                 let sPoint = beatToPoint(safeBeat(sn.beat));
                 let sX = sn.x;
 
-                // mcファイルの中から「始点のタイミングとX座標が一致する壊れたスライド」を探し出す
+                // 壊れたまま残っているスライドがあれば見つけ出して削除リストに入れる
                 for (let n of data.note) {
                     if (n.seg && !deletedNotes.has(n)) {
                         if (Math.abs(beatToPoint(safeBeat(n.beat)) - sPoint) < 1e-4 && n.x === sX) {
-                            deletedNotes.add(n); // 削除対象としてマーク
+                            deletedNotes.add(n);
                         }
                     }
                 }
@@ -365,7 +381,7 @@ function restoreData() {
             dlLink.style.display = "block";
 
             msgDiv.style.color = "#e65100";
-            msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${restoredCount} 個の敷スライドを救出しました！</b>`;
+            msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${restoredCount} 個の敷スライドを譜面に挿入しました！</b>`;
 
         } catch (err) {
             console.error(err);
