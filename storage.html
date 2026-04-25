@@ -19,6 +19,7 @@
         
         .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
         .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        .note { font-size: 0.8em; color: #666; margin-top: 5px; display: block; line-height: 1.4; }
         
         button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
         .btn-add { background: #17a2b8; margin-bottom: 20px; }
@@ -39,7 +40,7 @@
         .dl-link.secondary:hover { background: #c2185b; }
         
         #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
-        textarea { width: 100%; height: 120px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 0.85em; resize: vertical; }
+        textarea { width: 100%; height: 120px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 0.85em; resize: vertical; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -53,6 +54,7 @@
     
     <div class="form-group" style="margin-bottom: 20px;">
         <label>📁 対象の .mcファイルを選択</label>
+        <span class="note" style="margin-top: -3px; margin-bottom: 8px;">保管モードなら「元の譜面」、復元モードなら「壊れた/軽量化された譜面」を選択します。</span>
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
@@ -61,11 +63,11 @@
         <label style="font-weight: bold; margin-bottom: 10px; color: #0d47a1;">⚙️ モード選択</label>
         <label>
             <input type="radio" name="toolMode" value="export" checked onchange="switchMode()"> <b>💾 保管モード (Export)</b>
-            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定範囲内のスライドを抽出し、復元用テキストと軽量化されたmcデータを作ります。</span>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定範囲内のスライドを抽出し、復元用テキスト(.txt)と軽量化された(.mc)を作ります。</span>
         </label>
         <label style="margin-top: 5px;">
             <input type="radio" name="toolMode" value="restore" onchange="switchMode()"> <b>🛠️ 復元モード (Restore)</b>
-            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">壊れた、またはスライドを削除したmcファイルに、保管データを上書きして完全修復します。</span>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">壊れたmcファイルと、保管したtxtファイルの<b>2つを読み込ませて</b>完全修復します。</span>
         </label>
     </div>
 
@@ -89,7 +91,7 @@
         <button type="button" class="btn-export" onclick="exportData()">💾 保管データを生成</button>
 
         <div id="exportResult" style="display:none; margin-top: 20px;">
-            <label style="color: #007bff;">📋 抽出された保管データ</label>
+            <label style="color: #007bff;">📋 抽出された保管データ (確認用)</label>
             <textarea id="exportText" readonly></textarea>
             <button type="button" class="btn-copy" onclick="copyExportText()">📋 テキストをコピー</button>
             <a id="dlExportTxtLink" class="dl-link" href="#">💾 保管データ (.txt) をダウンロード</a>
@@ -99,11 +101,10 @@
 
     <!-- 復元モード (Restore) のUI -->
     <div id="restoreSection" style="display:none;">
-        <div class="form-group">
-            <label style="color: #e65100;">📋 保管データを貼り付け</label>
-            <span style="font-size:0.8em; color:#666; display:block; margin-bottom:5px;">※以前「保管モード」で作成したテキストをここにペーストするか、テキストファイルを選択して読み込んでください。</span>
-            <input type="file" id="txtFile" accept=".txt,.json" onchange="loadTxtFile()" style="margin-bottom: 10px;">
-            <textarea id="restoreText" placeholder='ここに保管データをペースト...'></textarea>
+        <div class="form-group" style="background: #fff3e0; padding: 15px; border-radius: 8px; border: 1px solid #ffe0b2; margin-bottom: 20px;">
+            <label style="color: #e65100;">📁 保存しておいた保管データ (.txt) を選択</label>
+            <input type="file" id="txtFile" accept=".txt,.json">
+            <span class="note">保管モードで出力・保存しておいた <code>_backup.txt</code> ファイルを選択してください。</span>
         </div>
         <button type="button" class="btn-restore" onclick="restoreData()">🛠️ 復元を実行</button>
         <a id="dlRestoreLink" class="dl-link" href="#">💾 復元済みファイルをダウンロード</a>
@@ -202,7 +203,7 @@ function exportData() {
 
     if (!fileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
-        return msgDiv.innerHTML = "mcファイルを選択してください。";
+        return msgDiv.innerHTML = "一番上の「.mcファイル」を選択してください。";
     }
 
     const rangeGroups = document.querySelectorAll('.range-group');
@@ -233,7 +234,6 @@ function exportData() {
             const notesToDelete = new Set();
 
             for (let note of data.note) {
-                // スライド(segあり)のみを抽出対象とする
                 if (note.seg && Array.isArray(note.seg)) {
                     const point = beatToPoint(safeBeat(note.beat));
                     let inRange = false;
@@ -243,7 +243,6 @@ function exportData() {
                         }
                     }
                     if (inRange) {
-                        // オブジェクトのディープコピーを保存
                         extractedNotes.push(JSON.parse(JSON.stringify(note)));
                         notesToDelete.add(note);
                     }
@@ -275,7 +274,8 @@ function exportData() {
             mcLink.style.display = "block";
 
             msgDiv.style.color = "#28a745";
-            msgDiv.innerHTML = `✅ ${extractedNotes.length} 個のスライドを抽出し、保管データを作成しました！`;
+            msgDiv.innerHTML = `✅ ${extractedNotes.length} 個のスライドを抽出し、保管データを作成しました！<br>
+            <span style="font-weight:normal; font-size:0.9em;">下のピンク色のボタンから軽量化したmcファイルをダウンロードして作業を続けてください。</span>`;
 
         } catch (err) {
             console.error(err);
@@ -292,104 +292,102 @@ function copyExportText() {
     navigator.clipboard.writeText(text.value).then(() => {
         alert("クリップボードにコピーしました！");
     }).catch(() => {
-        alert("コピーに失敗しました。手動でコピーしてください。");
+        alert("コピーに失敗しました。");
     });
 }
 
-// テキストファイルを読み込んで復元エリアに流し込む
-function loadTxtFile() {
-    const fileInput = document.getElementById("txtFile");
-    if (!fileInput.files.length) return;
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        document.getElementById("restoreText").value = e.target.result.trim();
-    };
-    reader.readAsText(fileInput.files[0]);
-}
-
 // ==========================================
-// 復元モード (Restore)
+// 復元モード (Restore) - Wファイル非同期読み込み
 // ==========================================
-function restoreData() {
-    const fileInput = document.getElementById("mcFile");
-    const restoreText = document.getElementById("restoreText").value.trim();
+async function restoreData() {
+    const mcFileInput = document.getElementById("mcFile");
+    const txtFileInput = document.getElementById("txtFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlRestoreLink");
     
     msgDiv.innerHTML = "";
     dlLink.style.display = "none";
 
-    if (!fileInput.files.length) {
+    if (!mcFileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
-        return msgDiv.innerHTML = "mcファイルを選択してください。";
+        return msgDiv.innerHTML = "一番上の「対象の.mcファイル」を選択してください。";
     }
-    if (!restoreText) {
+    if (!txtFileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
-        return msgDiv.innerHTML = "保管データをテキストエリアに貼り付けるか、ファイルを読み込んでください。";
+        return msgDiv.innerHTML = "オレンジ枠の「保管データ(.txt)」を選択してください。";
     }
 
-    let savedNotes;
+    // ファイルを非同期で読み込む関数
+    const readFileAsync = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsText(file);
+    });
+
     try {
-        savedNotes = JSON.parse(restoreText);
-        if (!Array.isArray(savedNotes)) throw new Error("配列ではありません");
-    } catch(e) {
-        msgDiv.style.color = "#d32f2f";
-        return msgDiv.innerHTML = "保管データの形式が正しくありません。";
-    }
-
-    const file = fileInput.files[0];
-    const reader = new FileReader();
-    reader.onload = function(e) {
+        // .txtファイルの読み込みと解析
+        const txtStr = await readFileAsync(txtFileInput.files[0]);
+        let savedNotes;
         try {
-            let cleanStr = e.target.result.replace(/^\uFEFF/, '').trim();
-            const data = JSON.parse(cleanStr);
-            if (!data.note) throw new Error("note配列が存在しません。");
+            savedNotes = JSON.parse(txtStr.trim());
+            if (!Array.isArray(savedNotes)) throw new Error("配列ではありません");
+        } catch(e) {
+            msgDiv.style.color = "#d32f2f";
+            return msgDiv.innerHTML = "保管データの形式が正しくありません。正しい .txt ファイルを選択してください。";
+        }
 
-            let deletedNotes = new Set();
-            let restoredCount = 0;
+        // .mcファイルの読み込みと解析
+        const mcStr = await readFileAsync(mcFileInput.files[0]);
+        let cleanStr = mcStr.replace(/^\uFEFF/, '').trim();
+        const data = JSON.parse(cleanStr);
+        
+        if (!data.note) throw new Error("note配列が存在しません。");
 
-            for (let sn of savedNotes) {
-                let sPoint = beatToPoint(safeBeat(sn.beat));
-                let sX = sn.x;
+        let deletedNotes = new Set();
+        let restoredCount = 0;
 
-                // 壊れたまま残っているスライドがあれば見つけ出して削除リストに入れる
-                for (let n of data.note) {
-                    if (n.seg && !deletedNotes.has(n)) {
-                        if (Math.abs(beatToPoint(safeBeat(n.beat)) - sPoint) < 1e-4 && n.x === sX) {
-                            deletedNotes.add(n);
-                        }
+        for (let sn of savedNotes) {
+            let sPoint = beatToPoint(safeBeat(sn.beat));
+            let sX = sn.x;
+
+            // mcファイルの中から「始点のタイミングとX座標が一致する壊れたスライド」を探し出して削除予定リストへ
+            for (let n of data.note) {
+                if (n.seg && !deletedNotes.has(n)) {
+                    if (Math.abs(beatToPoint(safeBeat(n.beat)) - sPoint) < 1e-4 && n.x === sX) {
+                        deletedNotes.add(n);
                     }
                 }
-                // 保管してあった無傷のノーツを追加
-                data.note.push(sn);
-                restoredCount++;
             }
-
-            // 壊れたノーツを除外する
-            data.note = data.note.filter(n => !deletedNotes.has(n));
-
-            // 時間順にソートし直す
-            data.note.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
-
-            const outJson = JSON.stringify(data);
-            const blob = new Blob([outJson], { type: "application/octet-stream" });
-            const url = URL.createObjectURL(blob);
-            
-            dlLink.href = url;
-            let originalName = file.name.replace(/\.[^/.]+$/, "");
-            dlLink.download = originalName + "_restored.mc";
-            dlLink.style.display = "block";
-
-            msgDiv.style.color = "#e65100";
-            msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${restoredCount} 個の敷スライドを譜面に挿入しました！</b>`;
-
-        } catch (err) {
-            console.error(err);
-            msgDiv.style.color = "#d32f2f";
-            msgDiv.innerHTML = "ファイルの解析に失敗しました。";
+            // 保管してあった無傷のノーツを追加
+            data.note.push(sn);
+            restoredCount++;
         }
-    };
-    reader.readAsText(file);
+
+        // 壊れたノーツを除外する
+        data.note = data.note.filter(n => !deletedNotes.has(n));
+
+        // 時間順にソートし直す
+        data.note.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+
+        const outJson = JSON.stringify(data);
+        const blob = new Blob([outJson], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        
+        dlLink.href = url;
+        let originalName = mcFileInput.files[0].name.replace(/\.[^/.]+$/, "");
+        dlLink.download = originalName + "_restored.mc";
+        dlLink.style.display = "block";
+
+        msgDiv.style.color = "#e65100";
+        msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${restoredCount} 個の敷スライドを譜面に挿入しました！</b><br>
+        <span style="font-weight:normal; font-size:0.9em;">元の場所にあった壊れたスライドは自動で削除されています。</span>`;
+
+    } catch (err) {
+        console.error(err);
+        msgDiv.style.color = "#d32f2f";
+        msgDiv.innerHTML = "ファイルの解析に失敗しました。データが破損している可能性があります。";
+    }
 }
 </script>
 
