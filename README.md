@@ -40,4 +40,4 @@ https://sekanndopuro-code.github.io/Malody-tools/shimashima2delay
 https://sekanndopuro-code.github.io/Malody-tools/shreddedmerge
 
 
-自分用に作ったやつなので色々がばいです
+自分用に作ったやつなので色々がばいです。AIが残していったMalodyの仕様を履き違えた文言がたまにあります。
