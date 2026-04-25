@@ -36,8 +36,8 @@
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
         装飾スライドの描画時間を<b>1/100 に圧縮</b>して幹スライドの軌道上から分岐させ、「一瞬だけ元の模様が見える」超高速演出を生成します。<br>
-        <b>幹が逆走(マイナスseg)していても形は完全に維持されます。</b><br>
-        装飾の基準を `1/99` シフトし、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
+        <b>結合処理の完了後、全てのsegに対して「1/99」の均等なタイムシフトを適用します。</b><br>
+        自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -176,7 +176,7 @@ function beatDiv(beat, divisor) {
     return[newM, newN / g, den / g];
 }
 
-// ★完璧だった ai_studio_code 2.html のパトロールロジックを100%復元★
+// ai_studio_code 2.html のパトロール
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
@@ -319,9 +319,7 @@ function processMC() {
                 let branches = targetSlides.slice(1);
                 let branchEvents =[];
                 
-                // ★ 1/99 シフトの基準値 ★
-                const shiftBaseBeat = [0, 1, 99];
-
+                // ai_studio_code 2.html の圧縮処理（ここではシフトは行わない）
                 if (branches.length > 0) {
                     for (let i = 0; i < branches.length; i++) {
                         const branch = branches[i];
@@ -330,9 +328,7 @@ function processMC() {
                         const offsetX = branchX - mainX;
                         
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
-                        
-                        // ★修正点ここだけ！ 1/100に圧縮し、さらに[0,1,99] を加算してずらす！
-                        const compOffsetBeat = beatAdd(beatDiv(origOffsetBeat, 100), shiftBaseBeat);
+                        const compOffsetBeat = beatDiv(origOffsetBeat, 100);
 
                         let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
                         let compLastSegBeat = beatDiv(lastSegBeat, 100);
@@ -355,7 +351,7 @@ function processMC() {
                 const newSeg =[];
                 let currentMainIdx = 0;
 
-                // ★完璧だった ai_studio_code 2.html の一筆書きロジックを100%復元★
+                // ai_studio_code 2.html の一筆書きロジック（完璧に動いていた部分）
                 for (let ev of branchEvents) {
                     while (currentMainIdx < mainPoints.length - 1) {
                         let p1 = mainPoints[currentMainIdx];
@@ -398,7 +394,18 @@ function processMC() {
                     newSeg.push({ beat: mainPoints[i].beat, x: mainPoints[i].x });
                 }
 
+                // 結合完了後、ai_studio_code 2.html のパトロールを実行
                 let fixCount = fixDuplicateSegs(newSeg);
+
+                // ==========================================
+                // ★ 新ロジック：処理が完全に終わった後、
+                // 例外なく「全てのseg」に一律で 1/99 を加える！
+                // ==========================================
+                const shiftBeat = [0, 1, 99];
+                for (let i = 0; i < newSeg.length; i++) {
+                    newSeg[i].beat = beatAdd(newSeg[i].beat, shiftBeat);
+                }
+
                 mainSlide.seg = newSeg;
                 
                 for (let i = 0; i < branches.length; i++) {
@@ -410,9 +417,9 @@ function processMC() {
                 resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
 
                 // ==========================================
-                // ★ ScrollエフェクトとJumpエフェクトの配置 (ご指定のタイミング) ★
+                // ★ ScrollエフェクトとJumpエフェクトの配置 ★
                 // ==========================================
-                let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
+                let scroll1Beat = beatAdd(mainBeat, [0, 1, 99]);
                 data.effect.push({ beat: scroll1Beat, scroll: 100 });
 
                 let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
