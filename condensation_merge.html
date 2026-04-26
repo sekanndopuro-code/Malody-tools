@@ -37,7 +37,7 @@
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
         装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
-        分母が大きくなりすぎて形が崩れる（近似値が荒くなる）のを防ぐ安全装置を搭載しています。<br>
+        マイナス(逆走)スライドでも、幹の現在座標を計算して直角に分岐・帰還します。幹のsegは絶対に変更されません。<br>
         自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
@@ -132,7 +132,27 @@ function parseBeat(str) {
 }
 
 // ========================================================
-// ★ 安全な分数計算 (Malodyでの計算崩壊・分母爆発を防ぐ) ★
+// ★ 幹の現在X座標を計算する関数 ★
+// ========================================================
+function getRelXAt(mainPoints, targetPoint) {
+    if (mainPoints.length === 1) return mainPoints[0].x;
+    if (targetPoint <= mainPoints[0].point) return mainPoints[0].x;
+    if (targetPoint >= mainPoints[mainPoints.length - 1].point) return mainPoints[mainPoints.length - 1].x;
+    
+    for (let i = 0; i < mainPoints.length - 1; i++) {
+        let p1 = mainPoints[i];
+        let p2 = mainPoints[i+1];
+        if (p1.point <= targetPoint && targetPoint <= p2.point) {
+            if (Math.abs(p2.point - p1.point) < 1e-10) return p2.x;
+            let t = (targetPoint - p1.point) / (p2.point - p1.point);
+            return p1.x + (p2.x - p1.x) * t;
+        }
+    }
+    return mainPoints[mainPoints.length - 1].x;
+}
+
+// ========================================================
+// 安全な分数計算 (Malodyでの計算崩壊・分母爆発を防ぐ)
 // ========================================================
 function limitDenom(beat, maxDenom = 100000) {
     let m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
@@ -167,7 +187,7 @@ function beatDiff(beat1, beat2) {
 
 function beatAdd(beat1, beat2) {
     if (!beat1) return[...beat2];
-    if (!beat2) return [...beat1];
+    if (!beat2) return[...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
     const num1 = n1 * d2;
@@ -198,22 +218,20 @@ function beatDiv(beat, divisor) {
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
-    const MICRO_DEN = 100000; // Malodyで安全な限界値(10万分の1)
+    const MICRO_DEN = 100000; 
     
     function addMicroOffset(beat, offsetCount) {
         if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
-        let b = beatAdd(beat, [0, offsetCount, MICRO_DEN]);
-        return limitDenom(b); // 必ず分母を丸めてバグを防ぐ
+        let b = beatAdd(beat,[0, offsetCount, MICRO_DEN]);
+        return limitDenom(b); 
     }
 
-    // 幹の本来のタイミングを絶対死守するため、先に幹の時間を登録
     for (let i = 0; i < segArray.length; i++) {
         if (segArray[i].isMain) {
             usedPoints.push(beatToPoint(segArray[i].beat));
         }
     }
 
-    // 枝の重複だけを少し未来へずらしていく
     for (let i = 0; i < segArray.length; i++) {
         let segItem = segArray[i];
         if (segItem.isMain) {
@@ -327,18 +345,21 @@ function processMC() {
                     continue;
                 }
 
-                // 始点が一番早いものを「メイン幹」とする
                 targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
                 const mainSlide = targetSlides[0];
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
-                // 幹スライドのsegはそのまま保持
+                // 幹のsegは絶対に変更せずそのまま保持する
                 let mainOriginalSegs = mainSlide.seg ||[];
 
+                // ★幹の軌道ポイント配列（分岐点の座標計算用）
+                let mainPoints = [ { beat: [0,0,0], point: 0, x: 0 } ];
+                for (let s of mainOriginalSegs) {
+                    mainPoints.push({ beat: s.beat, point: beatToPoint(s.beat), x: s.x });
+                }
+
                 let branches = targetSlides.slice(1);
-                
-                // ★ チューニング: 枝の圧縮率(1/100) と シフト基準(+1/99) ★
                 const shiftBaseBeat =[0, 1, 99];
                 let branchEvents =[];
                 
@@ -349,65 +370,62 @@ function processMC() {
                         const branchX = (typeof branch.x === 'number') ? branch.x : 0;
                         const offsetX = branchX - mainX;
                         
-                        // 本来の相対時間
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
                         
-                        // 縮合処理: 1/100 圧縮 ＋ 1/99 シフト
+                        // 1/100 圧縮 ＋ 1/99 シフト
                         const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 100));
 
-                        let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
-                        let compLastSegBeat = beatDiv(lastSegBeat, 100);
-                        
-                        let compEndRelBeat = beatAdd(compOffsetBeat, compLastSegBeat);
-                        let compEndRelPoint = beatToPoint(compEndRelBeat);
-
                         branchEvents.push({
-                            point: compEndRelPoint,
-                            compEndRelBeat: compEndRelBeat,
+                            compOffsetBeat: compOffsetBeat,
                             branchSegs: branchSegs,
-                            offsetX: offsetX,
-                            compOffsetBeat: compOffsetBeat
+                            offsetX: offsetX
                         });
                     }
                 }
 
-                branchEvents.sort((a, b) => a.point - b.point);
+                branchEvents.sort((a, b) => beatToPoint(a.compOffsetBeat) - beatToPoint(b.compOffsetBeat));
 
                 const newSeg =[];
 
-                // 枝の往復ブロック (幹の座標 x:0 を基準にする)
+                // ★ 枝の往復ブロック (幹の現在座標 trunkX を計算して分岐・帰還する)
                 for (let ev of branchEvents) {
-                    newSeg.push({ beat: [...ev.compEndRelBeat], x: 0 }); 
+                    let evStart = beatToPoint(ev.compOffsetBeat);
+                    let trunkX = Math.floor(getRelXAt(mainPoints, evStart));
 
-                    // 復路 (圧縮して追加)
-                    for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
-                        let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 100);
-                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
-                    }
-                    
-                    // 始点
+                    // 1. 幹の現在座標 (時間は始点)
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
+
+                    // 2. 枝の始点 (時間は始点)
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
 
-                    // 往路 (圧縮して追加)
+                    // 3. 往路 (圧縮して追加)
                     for (let j = 0; j < ev.branchSegs.length; j++) {
                         let s = ev.branchSegs[j];
                         let compSegBeat = beatDiv(s.beat, 100);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
 
-                    // 幹の基準座標(0)に戻る
-                    newSeg.push({ beat: [...ev.compEndRelBeat], x: 0 }); 
+                    // 4. 復路 (圧縮して追加、逆順)
+                    for (let j = ev.branchSegs.length - 2; j >= 0; j--) {
+                        let s = ev.branchSegs[j];
+                        let compSegBeat = beatDiv(s.beat, 100);
+                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                    }
+                    
+                    // 5. 枝の始点 (時間は始点)
+                    newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
+
+                    // 6. 幹の現在座標に戻る (時間は始点)
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
                 }
 
-                // 最後に幹スライド本体のsegを「そのまま」の形・タイミングでくっつける
+                // ★ 最後に幹スライド本体のsegを「そのまま」の形・タイミングでくっつける ★
                 for (let s of mainOriginalSegs) {
                     let mainSegClone = JSON.parse(JSON.stringify(s));
-                    mainSegClone.isMain = true; // 幹の印をつける
+                    mainSegClone.isMain = true; 
                     newSeg.push(mainSegClone);
                 }
 
-                // 分母爆発を抑えた重複パトロールを実行
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
@@ -420,17 +438,14 @@ function processMC() {
                 resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
 
                 // ==========================================
-                // ★ ScrollエフェクトとJumpエフェクトの自動配置 ★
+                // ★ ScrollエフェクトとJumpエフェクトの自動配置
                 // ==========================================
-                // 1. Scroll: 100 (始点 + 1/99)
                 let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
                 data.effect.push({ beat: scroll1Beat, scroll: 100 });
 
-                // 2. Jump: 99999 (始点 + 1/4)
                 let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
                 data.effect.push({ beat: jumpBeat, jump: 99999 });
 
-                // 3. Scroll: 1 (始点 + 1/2)
                 let scroll2Beat = beatAdd(mainBeat, [0, 1, 2]);
                 data.effect.push({ beat: scroll2Beat, scroll: 1 });
             }
@@ -441,7 +456,6 @@ function processMC() {
             }
 
             data.note = notes.filter(n => !allDeletedNotes.has(n));
-
             data.effect.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
 
             const outJson = JSON.stringify(data); 
