@@ -58,7 +58,6 @@
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
-    <!-- モード切り替え -->
     <div class="radio-group">
         <label style="font-weight: bold; margin-bottom: 10px; color: #0d47a1;">⚙️ モード選択</label>
         <label>
@@ -71,7 +70,6 @@
         </label>
     </div>
 
-    <!-- 保管モード (Export) のUI -->
     <div id="exportSection">
         <div id="rangesContainer">
             <div class="range-group clearfix" id="range-0">
@@ -99,12 +97,11 @@
         </div>
     </div>
 
-    <!-- 復元モード (Restore) のUI -->
     <div id="restoreSection" style="display:none;">
         <div class="form-group" style="background: #fff3e0; padding: 15px; border-radius: 8px; border: 1px solid #ffe0b2; margin-bottom: 20px;">
             <label style="color: #e65100;">📁 保存しておいた保管データ (.txt) を選択</label>
-            <input type="file" id="txtFile" accept=".txt,.json">
-            <span class="note">保管モードで出力・保存しておいた <code>_backup.txt</code> ファイルを選択してください。</span>
+            <input type="file" id="txtFile" accept=".txt,.json" multiple>
+            <span class="note">保管モードで出力・保存しておいた <code>_backup.txt</code> ファイルを選択してください。（複数選択可）</span>
         </div>
         <button type="button" class="btn-restore" onclick="restoreData()">🛠️ 復元を実行</button>
         <a id="dlRestoreLink" class="dl-link" href="#">💾 復元済みファイルをダウンロード</a>
@@ -297,7 +294,7 @@ function copyExportText() {
 }
 
 // ==========================================
-// 復元モード (Restore) - Wファイル非同期読み込み
+// 復元モード (Restore) - Wファイル非同期読み込み (複数ファイル対応版)
 // ==========================================
 async function restoreData() {
     const mcFileInput = document.getElementById("mcFile");
@@ -326,15 +323,20 @@ async function restoreData() {
     });
 
     try {
-        // .txtファイルの読み込みと解析
-        const txtStr = await readFileAsync(txtFileInput.files[0]);
-        let savedNotes;
-        try {
-            savedNotes = JSON.parse(txtStr.trim());
-            if (!Array.isArray(savedNotes)) throw new Error("配列ではありません");
-        } catch(e) {
-            msgDiv.style.color = "#d32f2f";
-            return msgDiv.innerHTML = "保管データの形式が正しくありません。正しい .txt ファイルを選択してください。";
+        // --- 複数の .txt ファイルを読み込んで結合 ---
+        let allSavedNotes = [];
+        for (let i = 0; i < txtFileInput.files.length; i++) {
+            const file = txtFileInput.files[i];
+            const txtStr = await readFileAsync(file);
+            try {
+                const parsedNotes = JSON.parse(txtStr.trim());
+                if (!Array.isArray(parsedNotes)) throw new Error("配列ではありません");
+                // 読み込んだ配列をメインの配列に結合していく
+                allSavedNotes = allSavedNotes.concat(parsedNotes);
+            } catch(e) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = `ファイル [${file.name}] の形式が正しくありません。正しい .txt ファイルを選択してください。`;
+            }
         }
 
         // .mcファイルの読み込みと解析
@@ -347,7 +349,7 @@ async function restoreData() {
         let deletedNotes = new Set();
         let restoredCount = 0;
 
-        for (let sn of savedNotes) {
+        for (let sn of allSavedNotes) {
             let sPoint = beatToPoint(safeBeat(sn.beat));
             let sX = sn.x;
 
@@ -380,7 +382,7 @@ async function restoreData() {
         dlLink.style.display = "block";
 
         msgDiv.style.color = "#e65100";
-        msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${restoredCount} 個の敷スライドを譜面に挿入しました！</b><br>
+        msgDiv.innerHTML = `<b>🛠️ 復元完了！ ${txtFileInput.files.length}個のファイルから、計 ${restoredCount} 個の敷スライドを譜面に挿入しました！</b><br>
         <span style="font-weight:normal; font-size:0.9em;">元の場所にあった壊れたスライドは自動で削除されています。</span>`;
 
     } catch (err) {
