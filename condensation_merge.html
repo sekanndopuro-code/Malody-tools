@@ -37,7 +37,7 @@
     <p class="desc">
         装飾スライドの描画時間を<b>1/100 に圧縮</b>して一筆書き結合を完了させた後、<b>「0より大きい(プラスの)装飾seg」だけを一律で「1/99」未来へシフト</b>します。<br>
         元々の幹スライドのsegは一ミリも動かず、元の形とタイミングを完全に維持します。<br>
-        自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
+        自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999999</code>(1/4)、<code>scroll: 0.3</code>(1001/4000) を配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -451,11 +451,11 @@ function processMC() {
 
                 // 2. Jump: 99999 (始点 + 1/4)
                 let jumpBeat = beatAdd(mainBeat,[0, 1, 4]);
-                data.effect.push({ beat: jumpBeat, jump: 99999 });
+                data.effect.push({ beat: jumpBeat, jump: 99999999 });
 
                 // 3. Scroll: 1 (始点 + 1/2)
-                let scroll2Beat = beatAdd(mainBeat,[0, 1, 2]);
-                data.effect.push({ beat: scroll2Beat, scroll: 1 });
+                let scroll2Beat = beatAdd(mainBeat,[0, 1001, 4000]);
+                data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
             }
 
             if (totalJoinedCount === 0) {
