@@ -36,8 +36,8 @@
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
         装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
-        マイナス(逆走)スライドでも、幹の現在座標を計算して直角に分岐・帰還します。幹のsegは絶対に変更されません。<br>
-        自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
+        プラス側への装飾はx=0に、マイナス側への装飾は幹の現在座標に接続します。幹のsegは絶対に変更されません。<br>
+        自動的に、<code>scroll: 30</code>(1/99)、<code>jump: 9999999</code>(1/4)、<code>scroll: 0.3</code>(1001/4000) を配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -146,7 +146,6 @@ function getRelXAt(mainPoints, targetPoint) {
         let p1 = mainPoints[i];
         let p2 = mainPoints[i+1];
         
-        // p1とp2の大小関係を問わず、targetPointが区間内にあるかチェック
         let minP = Math.min(p1.point, p2.point);
         let maxP = Math.max(p1.point, p2.point);
 
@@ -398,11 +397,19 @@ function processMC() {
 
                 const newSeg =[];
 
-                // ★ 枝の往復ブロック (ai_studio_code 3.html のロジック)
+                // ユーザー様ご提供の完璧な一筆書きロジックをベースにする
                 for (let ev of branchEvents) {
-                    let endPoint = beatToPoint(ev.compEndRelBeat);
-                    // ★修正点: x:0 ではなく、その時間の幹のX座標を計算する
-                    let trunkX = Math.floor(getRelXAt(mainPoints, endPoint));
+                    let trunkX;
+                    
+                    // ★ご指示通りの条件分岐★
+                    if (ev.offsetX < 0) {
+                        // マイナス側：幹の現在座標を参照
+                        let endPoint = beatToPoint(ev.compEndRelBeat);
+                        trunkX = Math.floor(getRelXAt(mainPoints, endPoint));
+                    } else {
+                        // プラス側：x=0 を参照
+                        trunkX = 0;
+                    }
 
                     newSeg.push({ beat: [...ev.compEndRelBeat], x: trunkX }); 
 
@@ -443,11 +450,11 @@ function processMC() {
 
                 // エフェクト配置
                 let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
-                data.effect.push({ beat: scroll1Beat, scroll: 100 });
+                data.effect.push({ beat: scroll1Beat, scroll:30 });
                 let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
                 data.effect.push({ beat: jumpBeat, jump: 99999 });
-                let scroll2Beat = beatAdd(mainBeat, [0, 1, 2]);
-                data.effect.push({ beat: scroll2Beat, scroll: 1 });
+                let scroll2Beat = beatAdd(mainBeat, [0, 1001, 4000]);
+                data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
             }
 
             if (totalJoinedCount === 0) {
