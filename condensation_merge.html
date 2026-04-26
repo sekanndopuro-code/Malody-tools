@@ -35,9 +35,9 @@
 <div class="container">
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
-        装飾を <b>1/100 に圧縮</b>し <b>+1/99 シフト</b> して結合します。<br>
-        装飾ブロックの終了後、プラス側は x=0 へ、マイナス側は元の幹の座標へ直角に折り曲げて接続します。幹のsegは絶対に変更されません。<br>
-        自動的に、<code>scroll: 100</code>、<code>jump: 99999</code>、<code>scroll: 1</code> を配置します。
+        装飾を <b>1/100に圧縮</b> ＆ <b>+1/99シフト</b> して結合します。<br>
+        装飾ブロックと幹の間に、順序として <b>x=0の頂点</b> を挿入し、直角な折り返しを形成します。<br>
+        自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -73,45 +73,27 @@ let rangeIdCounter = 1;
 function addRange() {
     const container = document.getElementById("rangesContainer");
     const id = "range-" + rangeIdCounter++;
-    const html = `
-    <div class="range-group clearfix" id="${id}">
-        <h4>範囲指定</h4>
-        <div class="form-group">
-            <label>始点Beat</label>
-            <input type="text" class="startBeat" placeholder="例: 449, 0, 1">
-        </div>
-        <div class="form-group">
-            <label>終点Beat</label>
-            <input type="text" class="endBeat" placeholder="例: 460, 0, 0">
-        </div>
-        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
-    </div>
-    `;
+    const html = `<div class="range-group clearfix" id="${id}"><h4>範囲指定</h4><div class="form-group"><label>始点Beat</label><input type="text" class="startBeat" placeholder="例: 449, 0, 1"></div><div class="form-group"><label>終点Beat</label><input type="text" class="endBeat" placeholder="例: 460, 0, 0"></div><button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button></div>`;
     container.insertAdjacentHTML('beforeend', html);
     updateRangeLabels();
 }
 
 function removeRange(id) {
     const container = document.getElementById("rangesContainer");
-    if (container.children.length <= 1) {
-        alert("最低でも1つの範囲指定が必要です！");
-        return;
-    }
+    if (container.children.length <= 1) { alert("最低でも1つの範囲指定が必要です！"); return; }
     document.getElementById(id).remove();
     updateRangeLabels();
 }
 
 function updateRangeLabels() {
     const groups = document.querySelectorAll('.range-group h4');
-    groups.forEach((el, index) => {
-        el.innerText = `範囲 ${index + 1}`;
-    });
+    groups.forEach((el, index) => { el.innerText = `範囲 ${index + 1}`; });
 }
 
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function safeBeat(beat) {
-    if (!beat || !Array.isArray(beat) || beat.length < 3) return[0, 0, 1];
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
     return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
 }
 
@@ -124,28 +106,8 @@ function parseBeat(str) {
     if (!str) return null;
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
-    if (parts && parts.length >= 3) {
-        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
-    }
+    if (parts && parts.length >= 3) { return [Number(parts[0]), Number(parts[1]), Number(parts[2])]; }
     return null;
-}
-
-// 幹の現在座標を計算（逆走対応）
-function getRelXAt(mainPoints, targetPoint) {
-    if (mainPoints.length === 1) return mainPoints[0].x;
-    let first = mainPoints[0], last = mainPoints[mainPoints.length - 1];
-    if (targetPoint <= first.point) return first.x;
-    if (targetPoint >= last.point) return last.x;
-    for (let i = 0; i < mainPoints.length - 1; i++) {
-        let p1 = mainPoints[i], p2 = mainPoints[i+1];
-        let minP = Math.min(p1.point, p2.point), maxP = Math.max(p1.point, p2.point);
-        if (targetPoint >= minP - 1e-10 && targetPoint <= maxP + 1e-10) {
-            if (Math.abs(p2.point - p1.point) < 1e-10) return p2.x;
-            let t = (targetPoint - p1.point) / (p2.point - p1.point);
-            return p1.x + (p2.x - p1.x) * t;
-        }
-    }
-    return last.x;
 }
 
 function limitDenom(beat, maxDenom = 100000) {
@@ -158,60 +120,36 @@ function limitDenom(beat, maxDenom = 100000) {
         let newNum = Math.round(val * maxDenom);
         let newDen = maxDenom;
         let g2 = Math.abs(gcd(newNum, newDen));
-        return[m, newNum / g2, newDen / g2];
+        return [m, newNum / g2, newDen / g2];
     }
-    return[m, n, d];
+    return [m, n, d];
 }
 
 function beatDiff(beat1, beat2) {
-    if (!beat1) return[0, 0, 0];
-    if (!beat2) return[...beat1];
-    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
-    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
-    const num1 = (m1 * d1 + n1) * d2;
-    const num2 = (m2 * d2 + n2) * d1;
-    const den = d1 * d2;
+    const b1 = safeBeat(beat1), b2 = safeBeat(beat2);
+    const num1 = (b1[0] * b1[2] + b1[1]) * b2[2], num2 = (b2[0] * b2[2] + b2[1]) * b1[2], den = b1[2] * b2[2];
     let diffNum = num1 - num2;
-    if (diffNum < 0) diffNum = 0; 
-    const m = Math.floor(diffNum / den);
-    const n = diffNum % den;
-    if (n === 0) return [m, 0, 1];
-    return limitDenom([m, n, den]);
+    if (diffNum < 0) diffNum = 0;
+    return limitDenom([Math.floor(diffNum / den), diffNum % den, den]);
 }
 
 function beatAdd(beat1, beat2) {
-    if (!beat1) return[...beat2];
-    if (!beat2) return[...beat1];
-    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
-    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
-    const num1 = n1 * d2;
-    const num2 = n2 * d1;
-    const den = d1 * d2;
+    const b1 = safeBeat(beat1), b2 = safeBeat(beat2);
+    const num1 = b1[1] * b2[2], num2 = b2[1] * b1[2], den = b1[2] * b2[2];
     let num = num1 + num2;
-    let m = m1 + m2 + Math.floor(num / den);
-    let n = num % den;
-    if (n === 0) return [m, 0, 1];
-    return limitDenom([m, n, den]);
+    return limitDenom([b1[0] + b2[0] + Math.floor(num / den), num % den, den]);
 }
 
 function beatDiv(beat, divisor) {
-    if (!beat) return[0, 0, 1];
-    const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
-    const num = m * d + n;
-    const den = d * divisor;
-    if (num === 0) return [0, 0, 1];
-    let newM = Math.floor(num / den);
-    let newN = num % den;
-    if (newN === 0) return[newM, 0, 1];
-    return limitDenom([newM, newN, den]);
+    const b = safeBeat(beat);
+    const num = b[0] * b[2] + b[1], den = b[2] * divisor;
+    return limitDenom([Math.floor(num / den), num % den, den]);
 }
 
 function fixDuplicateSegs(segArray) {
-    let usedPoints =[];
-    let fixedCount = 0;
+    let usedPoints = [], fixedCount = 0;
     const MICRO_DEN = 100000;
     function addMicroOffset(beat, offsetCount) {
-        if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
         return limitDenom(beatAdd(beat, [0, offsetCount, MICRO_DEN]));
     }
     for (let i = 0; i < segArray.length; i++) {
@@ -220,8 +158,7 @@ function fixDuplicateSegs(segArray) {
     for (let i = 0; i < segArray.length; i++) {
         let segItem = segArray[i];
         if (segItem.isMain) { delete segItem.isMain; continue; }
-        let p = beatToPoint(segItem.beat);
-        let conflictCount = 0, currentP = p;
+        let p = beatToPoint(segItem.beat), conflictCount = 0, currentP = p;
         while (true) {
             let isConflict = false;
             for (let j = 0; j < usedPoints.length; j++) {
@@ -238,96 +175,86 @@ function fixDuplicateSegs(segArray) {
 }
 
 function processMC() {
-    const fileInput = document.getElementById("mcFile");
-    const msgDiv = document.getElementById("resultMsg");
-    const dlLink = document.getElementById("dlLink");
+    const fileInput = document.getElementById("mcFile"), msgDiv = document.getElementById("resultMsg"), dlLink = document.getElementById("dlLink");
     msgDiv.innerHTML = ""; dlLink.style.display = "none";
     if (!fileInput.files.length) return msgDiv.innerHTML = "ファイルを選択してください。";
 
-    const rangeGroups = document.querySelectorAll('.range-group');
-    const ranges =[];
+    const rangeGroups = document.querySelectorAll('.range-group'), ranges = [];
     for (let i = 0; i < rangeGroups.length; i++) {
-        const startBeat = parseBeat(rangeGroups[i].querySelector('.startBeat').value);
-        const endBeat = parseBeat(rangeGroups[i].querySelector('.endBeat').value);
-        if (!startBeat || !endBeat) return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
-        ranges.push({ min: Math.min(beatToPoint(startBeat), beatToPoint(endBeat)), max: Math.max(beatToPoint(startBeat), beatToPoint(endBeat)) });
+        const startBeat = parseBeat(rangeGroups[i].querySelector('.startBeat').value), endBeat = parseBeat(rangeGroups[i].querySelector('.endBeat').value);
+        if (!startBeat || !endBeat) return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeat形式が不正です。`;
+        ranges.push({ min: Math.min(beatToPoint(startBeat), beatToPoint(endBeat)), max: Math.max(beatToPoint(startBeat), beatToPoint(endBeat)), index: i+1 });
     }
 
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
             const data = JSON.parse(e.target.result.replace(/^\uFEFF/, '').trim());
-            if (!data.note) return msgDiv.innerHTML = "無効な譜面データです。";
-            if (!data.effect) data.effect =[];
-
-            const notes = data.note;
-            let allDeletedNotes = new Set();
-            let totalJoinedCount = 0;
+            const notes = data.note; let allDeletedNotes = new Set(), totalJoinedCount = 0, resultLogs = [];
 
             for (let range of ranges) {
-                const targetSlides = notes.filter(n => n.seg && !allDeletedNotes.has(n) && beatToPoint(n.beat) >= range.min - 0.001 && beatToPoint(n.beat) <= range.max + 0.001);
-                if (targetSlides.length < 2) continue;
+                const targetSlides = notes.filter(n => !allDeletedNotes.has(n) && n.seg && Array.isArray(n.seg) && beatToPoint(n.beat) >= range.min - 0.001 && beatToPoint(n.beat) <= range.max + 0.001);
+                if (targetSlides.length < 2) { resultLogs.push(`⚠️ 範囲 ${range.index}: スライド不足`); continue; }
 
                 targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
                 const mainSlide = targetSlides[0], mainBeat = mainSlide.beat, mainX = mainSlide.x || 0;
-                let mainOriginalSegs = mainSlide.seg ||[];
-                let mainPoints = [ { point: 0, x: mainX } ];
-                for (let s of mainOriginalSegs) mainPoints.push({ point: beatToPoint(s.beat), x: s.x });
+                const mainOriginalSegs = mainSlide.seg || [], branches = targetSlides.slice(1);
+                const shiftBaseBeat = [0, 1, 99], branchEvents = [];
 
-                let allEvents = mainOriginalSegs.map(s => ({ type: 'trunk', point: beatToPoint(s.beat), seg: s }));
-                
-                const shiftBaseBeat =[0, 1, 99];
-                targetSlides.slice(1).forEach(branch => {
-                    const offsetX = (branch.x || 0) - mainX;
-                    const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(beatDiff(branch.beat, mainBeat), 100));
-                    allEvents.push({ type: 'deco', point: beatToPoint(compOffsetBeat), offsetBeat: compOffsetBeat, segs: branch.seg ||[], offsetX: offsetX });
-                    allDeletedNotes.add(branch);
-                });
+                for (let branch of branches) {
+                    const offsetX = (branch.x || 0) - mainX, origOffset = beatDiff(branch.beat, mainBeat);
+                    const compOffset = beatAdd(shiftBaseBeat, beatDiv(origOffset, 100));
+                    const lastSegBeat = branch.seg.length > 0 ? branch.seg[branch.seg.length - 1].beat : [0,0,0];
+                    const compEndRel = beatAdd(compOffset, beatDiv(lastSegBeat, 100));
+                    branchEvents.push({ compOffset, compEndRel, segs: branch.seg, offsetX });
+                }
 
-                allEvents.sort((a, b) => a.point - b.point);
-                const newSeg =[];
-                allEvents.forEach(ev => {
-                    if (ev.type === 'trunk') {
-                        newSeg.push({ ...JSON.parse(JSON.stringify(ev.seg)), isMain: true });
-                    } else {
-                        // 幹の現在地から分岐
-                        let trunkX = Math.floor(getRelXAt(mainPoints, ev.point));
-                        newSeg.push({ beat: [...ev.offsetBeat], x: trunkX });
-                        newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
-                        
-                        // 往復運動
-                        for (let j = 0; j < ev.segs.length; j++) {
-                            newSeg.push({ beat: beatAdd(ev.offsetBeat, beatDiv(ev.segs[j].beat, 100)), x: ev.offsetX + ev.segs[j].x });
-                        }
-                        for (let j = ev.segs.length - 2; j >= 0; j--) {
-                            newSeg.push({ beat: beatAdd(ev.offsetBeat, beatDiv(ev.segs[j].beat, 100)), x: ev.offsetX + ev.segs[j].x });
-                        }
-                        newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
-                        
-                        // ★ご指示の修正：装飾置き終わった直後に接続点を挿入
-                        if (ev.offsetX >= 0) {
-                            newSeg.push({ beat: beatAdd(ev.offsetBeat, [0, 1, 10000]), x: 0 }); // プラス側はx=0
-                        } else {
-                            newSeg.push({ beat: beatAdd(ev.offsetBeat, [0, 1, 10000]), x: trunkX }); // マイナス側は幹を参照
-                        }
-                        newSeg.push({ beat: [...ev.offsetBeat], x: trunkX }); // 幹の現在地へ帰還
+                branchEvents.sort((a, b) => beatToPoint(a.compEndRel) - beatToPoint(b.compEndRel));
+                const newSeg = [];
+
+                // 1. 全ての装飾（枝）ブロックを構築
+                for (let ev of branchEvents) {
+                    newSeg.push({ beat: [...ev.compEndRel], x: 0 });
+                    for (let j = ev.segs.length - 1; j >= 0; j--) {
+                        newSeg.push({ beat: beatAdd(ev.compOffset, beatDiv(ev.segs[j].beat, 100)), x: ev.offsetX + ev.segs[j].x });
                     }
-                });
+                    newSeg.push({ beat: [...ev.compOffset], x: ev.offsetX });
+                    for (let j = 0; j < ev.segs.length; j++) {
+                        newSeg.push({ beat: beatAdd(ev.compOffset, beatDiv(ev.segs[j].beat, 100)), x: ev.offsetX + ev.segs[j].x });
+                    }
+                    newSeg.push({ beat: [...ev.compEndRel], x: 0 });
+                }
 
-                fixDuplicateSegs(newSeg);
-                mainSlide.seg = newSeg;
+                // 2. ★ 枝の挿入が完了した直後に、配列順序として x=0 のカドを挿入 ★
+                if (branchEvents.length > 0) {
+                    const lastEv = branchEvents[branchEvents.length - 1];
+                    if (lastEv.offsetX >= 0) {
+                        // 時間は装飾終点のまま配列に追加。この次が幹(0地点)ならデータ上で逆行する
+                        newSeg.push({ beat: [...lastEv.compEndRel], x: 0 });
+                    }
+                }
+
+                // 3. 最後に幹の本来のsegを結合
+                for (let s of mainOriginalSegs) {
+                    let mClone = JSON.parse(JSON.stringify(s)); mClone.isMain = true; newSeg.push(mClone);
+                }
+
+                fixDuplicateSegs(newSeg); mainSlide.seg = newSeg;
+                branches.forEach(b => allDeletedNotes.add(b));
                 totalJoinedCount += targetSlides.length;
+                resultLogs.push(`✅ 範囲 ${range.index}: ${targetSlides.length}個結合`);
 
-                data.effect.push({ beat: beatAdd(mainBeat,[0, 1, 99]), scroll: 30 }, { beat: beatAdd(mainBeat,[0, 1, 4]), jump: 9999999 }, { beat: beatAdd(mainBeat,[0, 1001, 4]), scroll: 0.3 });
+                data.effect.push({ beat: beatAdd(mainBeat, [0, 1, 99]), scroll: 30 });
+                data.effect.push({ beat: beatAdd(mainBeat, [0, 1, 4]), jump: 9999999 });
+                data.effect.push({ beat: beatAdd(mainBeat, [0, 1, 2]), scroll: 0.3 });
             }
 
             data.note = notes.filter(n => !allDeletedNotes.has(n));
             data.effect.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
-
-            const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/octet-stream" }));
-            dlLink.href = url; dlLink.download = "condensed.mc"; dlLink.style.display = "block";
-            msgDiv.innerHTML = `<b>処理完了！ 合計 ${totalJoinedCount}個 のスライドを処理しました。</b>`;
-        } catch (err) { msgDiv.innerHTML = "ファイルの解析に失敗しました。"; }
+            const blob = new Blob([JSON.stringify(data)], { type: "application/octet-stream" });
+            dlLink.href = URL.createObjectURL(blob); dlLink.download = "processed.mc"; dlLink.style.display = "block";
+            msgDiv.innerHTML = `成功: ${totalJoinedCount}個のスライドを処理しました。`;
+        } catch (err) { console.error(err); msgDiv.innerHTML = "解析失敗"; }
     };
     reader.readAsText(fileInput.files[0]);
 }
