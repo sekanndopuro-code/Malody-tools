@@ -28,7 +28,6 @@
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
-        .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -36,8 +35,8 @@
 <div class="container">
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
-        装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
-        マイナス(逆走)スライドでも、幹の現在座標を計算して直角に分岐・帰還します。幹のsegは絶対に変更されません。<br>
+        装飾スライドを <b>1/100 に圧縮</b>し <b>+1/99 シフト</b> して、幹の軌道をなぞりながら「一筆書き」で結合します。<br>
+        マイナス(逆走)スライドでも、幹の現在座標から直角に分岐・帰還し、ワープ線は発生しません。<br>
         自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
@@ -131,9 +130,7 @@ function parseBeat(str) {
     return null;
 }
 
-// ========================================================
-// ★ 幹の現在X座標を計算する関数 ★
-// ========================================================
+// 幹の現在X座標を計算する関数
 function getRelXAt(mainPoints, targetPoint) {
     if (mainPoints.length === 1) return mainPoints[0].x;
     if (targetPoint <= mainPoints[0].point) return mainPoints[0].x;
@@ -151,9 +148,7 @@ function getRelXAt(mainPoints, targetPoint) {
     return mainPoints[mainPoints.length - 1].x;
 }
 
-// ========================================================
-// 安全な分数計算 (Malodyでの計算崩壊・分母爆発を防ぐ)
-// ========================================================
+// 安全な分数計算 (ユーザー様ご提供)
 function limitDenom(beat, maxDenom = 100000) {
     let m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
     if (n === 0) return [m, 0, 1];
@@ -212,9 +207,7 @@ function beatDiv(beat, divisor) {
     return limitDenom([newM, newN, den]);
 }
 
-// ========================================================
-// 重複パトロール (分母爆発を抑えた10万分の1ズレ)
-// ========================================================
+// 重複パトロール (ユーザー様ご提供)
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
@@ -350,10 +343,9 @@ function processMC() {
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
-                // 幹のsegは絶対に変更せずそのまま保持する
                 let mainOriginalSegs = mainSlide.seg ||[];
 
-                // ★幹の軌道ポイント配列（分岐点の座標計算用）
+                // 幹の軌道ポイント配列
                 let mainPoints = [ { beat: [0,0,0], point: 0, x: 0 } ];
                 for (let s of mainOriginalSegs) {
                     mainPoints.push({ beat: s.beat, point: beatToPoint(s.beat), x: s.x });
@@ -361,69 +353,71 @@ function processMC() {
 
                 let branches = targetSlides.slice(1);
                 const shiftBaseBeat =[0, 1, 99];
-                let branchEvents =[];
-                
+                let allEvents =[];
+
+                // ステップ1: 「幹のseg」と「枝のseg」を全てイベント化する
+                // 幹のイベント
+                for(let seg of mainOriginalSegs) {
+                    allEvents.push({ type: 'main_seg', point: beatToPoint(seg.beat), seg: seg });
+                }
+
+                // 枝のイベント
                 if (branches.length > 0) {
-                    for (let i = 0; i < branches.length; i++) {
-                        const branch = branches[i];
+                    for (let branch of branches) {
                         const branchSegs = branch.seg ||[];
                         const branchX = (typeof branch.x === 'number') ? branch.x : 0;
                         const offsetX = branchX - mainX;
-                        
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
-                        
-                        // 1/100 圧縮 ＋ 1/99 シフト
                         const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 100));
-
-                        branchEvents.push({
-                            compOffsetBeat: compOffsetBeat,
-                            branchSegs: branchSegs,
+                        
+                        // 枝イベントの開始点として登録
+                        allEvents.push({ 
+                            type: 'branch_event',
+                            point: beatToPoint(compOffsetBeat),
+                            offsetBeat: compOffsetBeat,
+                            segs: branchSegs,
                             offsetX: offsetX
                         });
                     }
                 }
 
-                branchEvents.sort((a, b) => beatToPoint(a.compOffsetBeat) - beatToPoint(b.compOffsetBeat));
+                // ステップ2: 全てのイベントを時間順にソートする
+                allEvents.sort((a, b) => a.point - b.point);
 
                 const newSeg =[];
 
-                // ★ 枝の往復ブロック (幹の現在座標 trunkX を計算して分岐・帰還する)
-                for (let ev of branchEvents) {
-                    let evStart = beatToPoint(ev.compOffsetBeat);
-                    let trunkX = Math.floor(getRelXAt(mainPoints, evStart));
+                // ステップ3: ソートされたイベントを元に一筆書きでsegを再構築
+                for (let ev of allEvents) {
+                    if (ev.type === 'main_seg') {
+                        // 幹のsegはそのまま追加
+                        let mainSegClone = JSON.parse(JSON.stringify(ev.seg));
+                        mainSegClone.isMain = true;
+                        newSeg.push(mainSegClone);
+                    } else if (ev.type === 'branch_event') {
+                        // 枝のイベントは、その時間の幹の座標から往復運動を描く
+                        let trunkX = Math.floor(getRelXAt(mainPoints, ev.point));
 
-                    // 1. 幹の現在座標 (時間は始点)
-                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
+                        newSeg.push({ beat: [...ev.offsetBeat], x: trunkX }); 
+                        newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
 
-                    // 2. 枝の始点 (時間は始点)
-                    newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
+                        for (let j = 0; j < ev.segs.length; j++) {
+                            let s = ev.segs[j];
+                            let compSegBeat = beatDiv(s.beat, 100);
+                            newSeg.push({ beat: beatAdd(ev.offsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                        }
 
-                    // 3. 往路 (圧縮して追加)
-                    for (let j = 0; j < ev.branchSegs.length; j++) {
-                        let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 100);
-                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                        for (let j = ev.segs.length - 2; j >= 0; j--) {
+                            let s = ev.segs[j];
+                            let compSegBeat = beatDiv(s.beat, 100);
+                            newSeg.push({ beat: beatAdd(ev.offsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                        }
+                        
+                        if (ev.segs.length > 0) {
+                           newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
+                        }
+                        
+                        newSeg.push({ beat:[...ev.offsetBeat], x: trunkX }); 
                     }
-
-                    // 4. 復路 (圧縮して追加、逆順)
-                    for (let j = ev.branchSegs.length - 2; j >= 0; j--) {
-                        let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 100);
-                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
-                    }
-                    
-                    // 5. 枝の始点 (時間は始点)
-                    newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
-
-                    // 6. 幹の現在座標に戻る (時間は始点)
-                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
-                }
-
-                // ★ 最後に幹スライド本体のsegを「そのまま」の形・タイミングでくっつける ★
-                for (let s of mainOriginalSegs) {
-                    let mainSegClone = JSON.parse(JSON.stringify(s));
-                    mainSegClone.isMain = true; 
-                    newSeg.push(mainSegClone);
                 }
 
                 let fixCount = fixDuplicateSegs(newSeg);
@@ -437,15 +431,11 @@ function processMC() {
                 let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
                 resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
 
-                // ==========================================
-                // ★ ScrollエフェクトとJumpエフェクトの自動配置
-                // ==========================================
+                // エフェクト配置
                 let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
                 data.effect.push({ beat: scroll1Beat, scroll: 100 });
-
                 let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
                 data.effect.push({ beat: jumpBeat, jump: 99999 });
-
                 let scroll2Beat = beatAdd(mainBeat, [0, 1, 2]);
                 data.effect.push({ beat: scroll2Beat, scroll: 1 });
             }
@@ -483,4 +473,4 @@ function processMC() {
 </script>
 
 </body>
-</html>
+</html>```
