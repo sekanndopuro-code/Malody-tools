@@ -318,7 +318,7 @@ function processMC() {
                 mainSlide.seg = newSeg;
                 totalJoinedCount += targetSlides.length;
 
-                data.effect.push({ beat: beatAdd(mainBeat,[0, 1, 99]), scroll: 100 }, { beat: beatAdd(mainBeat,[0, 1, 4]), jump: 99999 }, { beat: beatAdd(mainBeat,[0, 1, 2]), scroll: 1 });
+                data.effect.push({ beat: beatAdd(mainBeat,[0, 1, 99]), scroll: 30 }, { beat: beatAdd(mainBeat,[0, 1, 4]), jump: 9999999 }, { beat: beatAdd(mainBeat,[0, 1001, 4]), scroll: 0.3 });
             }
 
             data.note = notes.filter(n => !allDeletedNotes.has(n));
