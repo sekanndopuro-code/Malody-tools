@@ -35,8 +35,8 @@
 <div class="container">
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
-        装飾スライドを <b>1/100 に圧縮</b>し <b>+1/99 シフト</b> して、幹の軌道をなぞりながら「一筆書き」で結合します。<br>
-        マイナス(逆走)スライドでも、幹の現在座標から直角に分岐・帰還し、ワープ線は発生しません。<br>
+        装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
+        マイナス(逆走)スライドでも、幹の現在座標を計算して直角に分岐・帰還します。幹のsegは絶対に変更されません。<br>
         自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
@@ -130,7 +130,9 @@ function parseBeat(str) {
     return null;
 }
 
-// 幹の現在X座標を計算する関数
+// ========================================================
+// ★ 幹の現在X座標を計算する関数 (逆走対応) ★
+// ========================================================
 function getRelXAt(mainPoints, targetPoint) {
     if (mainPoints.length === 1) return mainPoints[0].x;
 
@@ -143,12 +145,12 @@ function getRelXAt(mainPoints, targetPoint) {
     for (let i = 0; i < mainPoints.length - 1; i++) {
         let p1 = mainPoints[i];
         let p2 = mainPoints[i+1];
-
-        // 逆走対応 (p1とp2の大小関係を問わない)
+        
+        // p1とp2の大小関係を問わず、targetPointが区間内にあるかチェック
         let minP = Math.min(p1.point, p2.point);
         let maxP = Math.max(p1.point, p2.point);
 
-        if (targetPoint >= minP && targetPoint <= maxP) {
+        if (targetPoint >= minP - 1e-10 && targetPoint <= maxP + 1e-10) {
             if (Math.abs(p2.point - p1.point) < 1e-10) return p2.x;
             let t = (targetPoint - p1.point) / (p2.point - p1.point);
             return p1.x + (p2.x - p1.x) * t;
@@ -157,7 +159,10 @@ function getRelXAt(mainPoints, targetPoint) {
     return lastPoint.x;
 }
 
-// 安全な分数計算 (ユーザー様ご提供)
+
+// ========================================================
+// 安全な分数計算 (ユーザー様ご提供のコード)
+// ========================================================
 function limitDenom(beat, maxDenom = 100000) {
     let m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
     if (n === 0) return [m, 0, 1];
@@ -216,16 +221,18 @@ function beatDiv(beat, divisor) {
     return limitDenom([newM, newN, den]);
 }
 
-// 重複パトロール (ユーザー様ご提供)
+// ========================================================
+// 重複パトロール (ユーザー様ご提供のコード)
+// ========================================================
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
     let fixedCount = 0;
-    const MICRO_DEN = 100000; 
+    const MICRO_DEN = 100000;
     
     function addMicroOffset(beat, offsetCount) {
         if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
-        let b = beatAdd(beat,[0, offsetCount, MICRO_DEN]);
-        return limitDenom(b); 
+        let b = beatAdd(beat, [0, offsetCount, MICRO_DEN]);
+        return limitDenom(b);
     }
 
     for (let i = 0; i < segArray.length; i++) {
@@ -354,7 +361,7 @@ function processMC() {
 
                 let mainOriginalSegs = mainSlide.seg ||[];
 
-                // 幹の軌道ポイント配列
+                // 幹の軌道ポイント配列（分岐点の座標計算用）
                 let mainPoints = [ { beat: [0,0,0], point: 0, x: 0 } ];
                 for (let s of mainOriginalSegs) {
                     mainPoints.push({ beat: s.beat, point: beatToPoint(s.beat), x: s.x });
@@ -362,67 +369,65 @@ function processMC() {
 
                 let branches = targetSlides.slice(1);
                 const shiftBaseBeat =[0, 1, 99];
-                let allEvents =[];
-
-                // ステップ1: 「幹のseg」と「枝のseg」を全てイベント化
-                for(let seg of mainOriginalSegs) {
-                    allEvents.push({ type: 'main_seg', point: beatToPoint(seg.beat), seg: seg });
-                }
-
+                let branchEvents =[];
+                
                 if (branches.length > 0) {
                     for (let branch of branches) {
                         const branchSegs = branch.seg ||[];
                         const branchX = (typeof branch.x === 'number') ? branch.x : 0;
                         const offsetX = branchX - mainX;
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
-                        const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 100));
                         
-                        allEvents.push({ 
-                            type: 'branch_event',
-                            point: beatToPoint(compOffsetBeat),
-                            offsetBeat: compOffsetBeat,
-                            segs: branchSegs,
+                        // 1/100 圧縮 ＋ 1/99 シフト
+                        const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 100));
+
+                        let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
+                        let compLastSegBeat = beatDiv(lastSegBeat, 100);
+                        let compEndRelBeat = beatAdd(compOffsetBeat, compLastSegBeat);
+                        
+                        branchEvents.push({
+                            compOffsetBeat: compOffsetBeat,
+                            compEndRelBeat: compEndRelBeat,
+                            branchSegs: branchSegs,
                             offsetX: offsetX
                         });
                     }
                 }
 
-                // ステップ2: 全てのイベントを時間順にソート
-                allEvents.sort((a, b) => a.point - b.point);
+                branchEvents.sort((a, b) => beatToPoint(a.compEndRelBeat) - beatToPoint(b.compEndRelBeat));
 
                 const newSeg =[];
 
-                // ステップ3: ソートされたイベントを元に一筆書きで再構築
-                for (let ev of allEvents) {
-                    if (ev.type === 'main_seg') {
-                        let mainSegClone = JSON.parse(JSON.stringify(ev.seg));
-                        mainSegClone.isMain = true;
-                        newSeg.push(mainSegClone);
-                    } else if (ev.type === 'branch_event') {
-                        let trunkX = Math.floor(getRelXAt(mainPoints, ev.point));
+                // ★ 枝の往復ブロック (ai_studio_code 3.html のロジック)
+                for (let ev of branchEvents) {
+                    let endPoint = beatToPoint(ev.compEndRelBeat);
+                    // ★修正点: x:0 ではなく、その時間の幹のX座標を計算する
+                    let trunkX = Math.floor(getRelXAt(mainPoints, endPoint));
 
-                        newSeg.push({ beat: [...ev.offsetBeat], x: trunkX }); 
-                        newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
+                    newSeg.push({ beat: [...ev.compEndRelBeat], x: trunkX }); 
 
-                        for (let j = 0; j < ev.segs.length; j++) {
-                            let s = ev.segs[j];
-                            let compSegBeat = beatDiv(s.beat, 100);
-                            newSeg.push({ beat: beatAdd(ev.offsetBeat, compSegBeat), x: ev.offsetX + s.x });
-                        }
-
-                        // 復路
-                        for (let j = ev.segs.length - 2; j >= 0; j--) {
-                             let s = ev.segs[j];
-                             let compSegBeat = beatDiv(s.beat, 100);
-                             newSeg.push({ beat: beatAdd(ev.offsetBeat, compSegBeat), x: ev.offsetX + s.x });
-                        }
-                        
-                        if (ev.segs.length > 0) {
-                           newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
-                        }
-                        
-                        newSeg.push({ beat:[...ev.offsetBeat], x: trunkX }); 
+                    for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
+                        let s = ev.branchSegs[j];
+                        let compSegBeat = beatDiv(s.beat, 100);
+                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
+                    
+                    newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
+
+                    for (let j = 0; j < ev.branchSegs.length; j++) {
+                        let s = ev.branchSegs[j];
+                        let compSegBeat = beatDiv(s.beat, 100);
+                        newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
+                    }
+
+                    newSeg.push({ beat: [...ev.compEndRelBeat], x: trunkX }); 
+                }
+
+                // 最後に幹スライド本体のsegを「そのまま」くっつける
+                for (let s of mainOriginalSegs) {
+                    let mainSegClone = JSON.parse(JSON.stringify(s));
+                    mainSegClone.isMain = true; 
+                    newSeg.push(mainSegClone);
                 }
 
                 let fixCount = fixDuplicateSegs(newSeg);
