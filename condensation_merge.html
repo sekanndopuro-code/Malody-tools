@@ -36,8 +36,8 @@
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
         装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
-        プラス側への装飾はx=0に、マイナス側への装飾は幹の現在座標に接続します。幹のsegは絶対に変更されません。<br>
-        自動的に、<code>scroll: 30</code>(1/99)、<code>jump: 9999999</code>(1/4)、<code>scroll: 0.3</code>(1001/4000) を配置します。
+        プラス側の装飾には、終点の直後に<b>「直角に曲がるためのseg(x=0)」</b>を自動で挿入します。<br>
+        自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -128,34 +128,6 @@ function parseBeat(str) {
         return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
-}
-
-// ========================================================
-// ★ 幹の現在X座標を計算する関数 (逆走対応) ★
-// ========================================================
-function getRelXAt(mainPoints, targetPoint) {
-    if (mainPoints.length === 1) return mainPoints[0].x;
-
-    let firstPoint = mainPoints[0];
-    let lastPoint = mainPoints[mainPoints.length - 1];
-
-    if (targetPoint <= firstPoint.point) return firstPoint.x;
-    if (targetPoint >= lastPoint.point) return lastPoint.x;
-    
-    for (let i = 0; i < mainPoints.length - 1; i++) {
-        let p1 = mainPoints[i];
-        let p2 = mainPoints[i+1];
-        
-        let minP = Math.min(p1.point, p2.point);
-        let maxP = Math.max(p1.point, p2.point);
-
-        if (targetPoint >= minP - 1e-10 && targetPoint <= maxP + 1e-10) {
-            if (Math.abs(p2.point - p1.point) < 1e-10) return p2.x;
-            let t = (targetPoint - p1.point) / (p2.point - p1.point);
-            return p1.x + (p2.x - p1.x) * t;
-        }
-    }
-    return lastPoint.x;
 }
 
 
@@ -359,14 +331,8 @@ function processMC() {
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
                 let mainOriginalSegs = mainSlide.seg ||[];
-
-                // 幹の軌道ポイント配列（分岐点の座標計算用）
-                let mainPoints = [ { beat: [0,0,0], point: 0, x: 0 } ];
-                for (let s of mainOriginalSegs) {
-                    mainPoints.push({ beat: s.beat, point: beatToPoint(s.beat), x: s.x });
-                }
-
                 let branches = targetSlides.slice(1);
+                
                 const shiftBaseBeat =[0, 1, 99];
                 let branchEvents =[];
                 
@@ -397,22 +363,12 @@ function processMC() {
 
                 const newSeg =[];
 
-                // ユーザー様ご提供の完璧な一筆書きロジックをベースにする
+                // ユーザー様ご提供の完璧な一筆書きロジック
                 for (let ev of branchEvents) {
-                    let trunkX;
                     
-                    // ★ご指示通りの条件分岐★
-                    if (ev.offsetX < 0) {
-                        // マイナス側：幹の現在座標を参照
-                        let endPoint = beatToPoint(ev.compEndRelBeat);
-                        trunkX = Math.floor(getRelXAt(mainPoints, endPoint));
-                    } else {
-                        // プラス側：x=0 を参照
-                        trunkX = 0;
-                    }
+                    newSeg.push({ beat: [...ev.compEndRelBeat], x: 0 }); 
 
-                    newSeg.push({ beat: [...ev.compEndRelBeat], x: trunkX }); 
-
+                    // 復路
                     for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
                         let s = ev.branchSegs[j];
                         let compSegBeat = beatDiv(s.beat, 100);
@@ -421,13 +377,21 @@ function processMC() {
                     
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
 
+                    // 往路
                     for (let j = 0; j < ev.branchSegs.length; j++) {
                         let s = ev.branchSegs[j];
                         let compSegBeat = beatDiv(s.beat, 100);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
 
-                    newSeg.push({ beat: [...ev.compEndRelBeat], x: trunkX }); 
+                    newSeg.push({ beat: [...ev.compEndRelBeat], x: 0 }); 
+                    
+                    // ★ご指示通りの修正★
+                    // プラス側の装飾の場合のみ、終点の直後(1/10000秒後)に x=0 のsegを追加して直角に曲げる
+                    if (ev.offsetX >= 0) {
+                        let rightAngleBeat = beatAdd(ev.compEndRelBeat, [0, 1, 10000]);
+                        newSeg.push({ beat: rightAngleBeat, x: 0 });
+                    }
                 }
 
                 // 最後に幹スライド本体のsegを「そのまま」くっつける
@@ -450,11 +414,11 @@ function processMC() {
 
                 // エフェクト配置
                 let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
-                data.effect.push({ beat: scroll1Beat, scroll:30 });
+                data.effect.push({ beat: scroll1Beat, scroll: 100 });
                 let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
                 data.effect.push({ beat: jumpBeat, jump: 99999 });
-                let scroll2Beat = beatAdd(mainBeat, [0, 1001, 4000]);
-                data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
+                let scroll2Beat = beatAdd(mainBeat, [0, 1, 2]);
+                data.effect.push({ beat: scroll2Beat, scroll: 1 });
             }
 
             if (totalJoinedCount === 0) {
