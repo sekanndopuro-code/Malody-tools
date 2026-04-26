@@ -36,7 +36,7 @@
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
         装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
-        プラス側の装飾には、終点の直後に<b>「直角に曲がるためのseg(x=0)」</b>を自動で挿入します。<br>
+        プラス側の装飾ブロックの末尾に<b>「直角に曲がるためのseg(x=0)」</b>を自動で挿入します。<br>
         自動的に、<code>scroll: 100</code>(1/99)、<code>jump: 99999</code>(1/4)、<code>scroll: 1</code>(1/2) を配置します。
     </p>
     
@@ -129,7 +129,6 @@ function parseBeat(str) {
     }
     return null;
 }
-
 
 // ========================================================
 // 安全な分数計算 (ユーザー様ご提供のコード)
@@ -363,95 +362,16 @@ function processMC() {
 
                 const newSeg =[];
 
-                // ユーザー様ご提供の完璧な一筆書きロジック
+                // ステップ1: まず装飾ブロック全体を構築
                 for (let ev of branchEvents) {
-                    
                     newSeg.push({ beat: [...ev.compEndRelBeat], x: 0 }); 
-
-                    // 復路
                     for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
                         let s = ev.branchSegs[j];
                         let compSegBeat = beatDiv(s.beat, 100);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
-                    
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
-
-                    // 往路
                     for (let j = 0; j < ev.branchSegs.length; j++) {
                         let s = ev.branchSegs[j];
                         let compSegBeat = beatDiv(s.beat, 100);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
-                    }
-
-                    newSeg.push({ beat: [...ev.compEndRelBeat], x: 0 }); 
-                    
-                    // ★ご指示通りの修正★
-                    // プラス側の装飾の場合のみ、終点の直後(1/10000秒後)に x=0 のsegを追加して直角に曲げる
-                    if (ev.offsetX >= 0) {
-                        let rightAngleBeat = beatAdd(ev.compEndRelBeat, [0, 1, 10000]);
-                        newSeg.push({ beat: rightAngleBeat, x: 0 });
-                    }
-                }
-
-                // 最後に幹スライド本体のsegを「そのまま」くっつける
-                for (let s of mainOriginalSegs) {
-                    let mainSegClone = JSON.parse(JSON.stringify(s));
-                    mainSegClone.isMain = true; 
-                    newSeg.push(mainSegClone);
-                }
-
-                let fixCount = fixDuplicateSegs(newSeg);
-                mainSlide.seg = newSeg;
-                
-                for (let i = 0; i < branches.length; i++) {
-                    allDeletedNotes.add(branches[i]);
-                }
-                
-                totalJoinedCount += targetSlides.length;
-                let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
-
-                // エフェクト配置
-                let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
-                data.effect.push({ beat: scroll1Beat, scroll: 100 });
-                let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
-                data.effect.push({ beat: jumpBeat, jump: 99999 });
-                let scroll2Beat = beatAdd(mainBeat, [0, 1, 2]);
-                data.effect.push({ beat: scroll2Beat, scroll: 1 });
-            }
-
-            if (totalJoinedCount === 0) {
-                msgDiv.style.color = "#d32f2f";
-                return msgDiv.innerHTML = "指定された範囲内に結合可能なスライドが見つかりませんでした。";
-            }
-
-            data.note = notes.filter(n => !allDeletedNotes.has(n));
-            data.effect.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
-
-            const outJson = JSON.stringify(data); 
-            const blob = new Blob([outJson], { type: "application/octet-stream" });
-            const url = URL.createObjectURL(blob);
-            
-            dlLink.href = url;
-            let originalName = file.name;
-            let dotIndex = originalName.lastIndexOf('.');
-            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
-            dlLink.download = originalName + "_condensed.mc";
-            
-            dlLink.style.display = "block";
-            
-            msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
-
-        } catch (err) {
-            console.error(err);
-            msgDiv.style.color = "#d32f2f";
-            msgDiv.innerHTML = "ファイルの解析に失敗しました。";
-        }
-    };
-    reader.readAsText(file);
-}
-</script>
-
-</body>
-</html>
