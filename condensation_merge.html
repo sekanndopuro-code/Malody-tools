@@ -13,6 +13,10 @@
         label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
         input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
         
+        .toggle-group { background: #e9ecef; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 0.9em; }
+        .toggle-group label { display: inline-flex; align-items: center; font-weight: normal; cursor: pointer; margin-bottom: 0; }
+        .toggle-group input[type="checkbox"] { width: auto; margin-right: 8px; transform: scale(1.2); }
+
         .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
         .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
         
@@ -36,14 +40,25 @@
 <div class="container">
     <h1>⚡ 縮合結合ツール</h1>
     <p class="desc">
-        装飾スライドを <b>1/100 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
-        マイナス(逆走)スライドでも、幹の現在座標を計算して直角に分岐・帰還します。幹のsegは絶対に変更されません。<br>
-        自動的に、<code>scroll: 30</code>(1/99)、<code>jump: 9999999</code>(1/4)、<code>scroll: 0.3</code>(1001/4000) を配置します。
+        装飾スライドを <b>1/200 に圧縮</b>し、さらに <b>+1/99 シフト</b> して結合します。<br>
+        マイナス(逆走)スライドでも、幹の現在座標を計算して直角に分岐・帰還します。幹のsegは絶対に変更されません。
     </p>
     
-    <div class="form-group" style="margin-bottom: 20px;">
+    <div class="form-group">
         <label>📁 対象の .mcファイルを選択</label>
         <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <!-- エフェクトの自動配置オンオフ機能 -->
+    <div class="toggle-group">
+        <label>
+            <input type="checkbox" id="autoEffectToggle" checked>
+            <b>Scroll / Jump エフェクトを自動配置する</b><br>
+            <span style="font-size: 0.85em; color: #666; margin-left: 24px; display:block;">
+                (1/99にscroll:60、1/8にjump:9999999、1001/8000にscroll:0.3 を配置)<br>
+                ※既に同じ位置に同じ値がある場合は重複して追加されません。
+            </span>
+        </label>
     </div>
 
     <div id="rangesContainer">
@@ -126,7 +141,7 @@ function parseBeat(str) {
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
@@ -152,14 +167,30 @@ function getRelXAt(mainPoints, targetPoint) {
 }
 
 // ========================================================
-// ★改善：連分数展開(Farey)を用いた高精度な分数近似
-// （分母爆発による丸め誤差・ズレを防止）
+// エフェクト重複判定関数（同じ座標で同じ値が存在するか）
+// ========================================================
+function hasEffect(effectArray, targetBeat, propName, propValue) {
+    const targetPoint = beatToPoint(targetBeat);
+    for (let i = 0; i < effectArray.length; i++) {
+        const e = effectArray[i];
+        if (e[propName] === propValue && e.beat) {
+            const ePoint = beatToPoint(e.beat);
+            // 微小な誤差を許容して一致判定 (1e-6)
+            if (Math.abs(ePoint - targetPoint) < 1e-6) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// ========================================================
+// ★ 連分数展開(Farey)を用いた高精度な分数近似
 // ========================================================
 function limitDenom(beat, maxDenom = 100000) {
     let m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
     if (n === 0) return [m, 0, 1];
     
-    // 符号と帯分数の正規化
     if (d < 0) { n = -n; d = -d; }
     if (n < 0) { 
         let shift = Math.floor(-n / d) + 1;
@@ -169,13 +200,12 @@ function limitDenom(beat, maxDenom = 100000) {
         let shift = Math.floor(n / d);
         m += shift; n -= shift * d;
     }
-    if (n === 0) return [m, 0, 1];
+    if (n === 0) return[m, 0, 1];
 
     let g = Math.abs(gcd(n, d));
     n /= g; d /= g;
-    if (d <= maxDenom) return [m, n, d];
+    if (d <= maxDenom) return[m, n, d];
 
-    // 連分数による有理数近似
     let val = n / d;
     let n0 = 0, d0 = 1, n1 = 1, d1 = 0;
     let num = n, den = d;
@@ -194,9 +224,9 @@ function limitDenom(beat, maxDenom = 100000) {
             let err1 = Math.abs(val - n1 / d1);
             let err2 = Math.abs(val - n_alt / d_alt);
             if (err2 < err1 && d_alt > 0) {
-                return [m, n_alt, d_alt];
+                return[m, n_alt, d_alt];
             } else {
-                return [m, n1, d1];
+                return[m, n1, d1];
             }
         }
         
@@ -239,7 +269,7 @@ function beatAdd(beat1, beat2) {
 }
 
 function beatDiv(beat, divisor) {
-    if (!beat) return [0, 0, 1];
+    if (!beat) return[0, 0, 1];
     const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
     const num = m * d + n;
     const den = d * divisor;
@@ -307,6 +337,7 @@ function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
+    const isAutoEffect = document.getElementById("autoEffectToggle").checked;
     
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
@@ -388,8 +419,7 @@ function processMC() {
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
-                // 幹のsegは絶対に変更せずそのまま保持する
-                let mainOriginalSegs = mainSlide.seg || [];
+                let mainOriginalSegs = mainSlide.seg ||[];
 
                 let mainPoints = [{ beat: [0,0,1], point: 0, x: 0 }];
                 for (let s of mainOriginalSegs) {
@@ -408,8 +438,8 @@ function processMC() {
                         const offsetX = branchX - mainX;
                         
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
-                        // 1/100 圧縮 ＋ 1/99 シフト
-                        const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 100));
+                        // 1/200 圧縮 ＋ 1/99 シフト
+                        const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 200));
 
                         branchEvents.push({
                             compOffsetBeat: compOffsetBeat,
@@ -423,39 +453,31 @@ function processMC() {
 
                 const newSeg =[];
 
-                // ★ 枝の往復ブロック (表現のため、復路で時間が逆行する元のロジックを維持)
+                // 枝の往復ブロック
                 for (let ev of branchEvents) {
                     let evStart = beatToPoint(ev.compOffsetBeat);
                     let trunkX = Math.floor(getRelXAt(mainPoints, evStart));
 
-                    // 1. 幹の現在座標 (時間は始点)
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: trunkX }); 
-
-                    // 2. 枝の始点 (時間は始点)
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
 
-                    // 3. 往路 (圧縮して追加)
                     for (let j = 0; j < ev.branchSegs.length; j++) {
                         let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 100);
+                        let compSegBeat = beatDiv(s.beat, 200);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
 
-                    // 4. 復路 (圧縮して追加、元の意図通り時間を遡る)
                     for (let j = ev.branchSegs.length - 2; j >= 0; j--) {
                         let s = ev.branchSegs[j];
-                        let compSegBeat = beatDiv(s.beat, 100);
+                        let compSegBeat = beatDiv(s.beat, 200);
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
                     
-                    // 5. 枝の始点 (時間は始点)
-                    newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
-
-                    // 6. 幹の現在座標に戻る (時間は始点)
-                    newSeg.push({ beat: [...ev.compOffsetBeat], x: trunkX }); 
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: ev.offsetX });
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
                 }
 
-                // ★ 最後に幹スライド本体のsegを「そのまま」の形・タイミングでくっつける ★
+                // 幹スライド本体
                 for (let s of mainOriginalSegs) {
                     let mainSegClone = JSON.parse(JSON.stringify(s));
                     mainSegClone.isMain = true; 
@@ -471,17 +493,27 @@ function processMC() {
                 
                 totalJoinedCount += targetSlides.length;
                 let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を縮合結合しました${fixMsg}</span>`);
+                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/200 縮合結合しました${fixMsg}</span>`);
 
-                // ScrollエフェクトとJumpエフェクトの自動配置
-                let scroll1Beat = beatAdd(mainBeat, [0, 1, 99]);
-                data.effect.push({ beat: scroll1Beat, scroll: 30 });
+                // ==========================================
+                // ★ ScrollエフェクトとJumpエフェクトの自動配置 (重複防止つき)
+                // ==========================================
+                if (isAutoEffect) {
+                    let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
+                    if (!hasEffect(data.effect, scroll1Beat, "scroll", 60)) {
+                        data.effect.push({ beat: scroll1Beat, scroll: 60 });
+                    }
 
-                let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
-                data.effect.push({ beat: jumpBeat, jump: 9999999 });
+                    let jumpBeat = beatAdd(mainBeat, [0, 1, 8]);
+                    if (!hasEffect(data.effect, jumpBeat, "jump", 9999999)) {
+                        data.effect.push({ beat: jumpBeat, jump: 9999999 });
+                    }
 
-                let scroll2Beat = beatAdd(mainBeat, [0, 1001, 4000]);
-                data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
+                    let scroll2Beat = beatAdd(mainBeat,[0, 1001, 8000]);
+                    if (!hasEffect(data.effect, scroll2Beat, "scroll", 0.3)) {
+                        data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
+                    }
+                }
             }
 
             if (totalJoinedCount === 0) {
