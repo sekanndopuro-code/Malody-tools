@@ -47,6 +47,6 @@ https://sekanndopuro-code.github.io/Malody-tools/storage
 
 [segmismatch縮小結合ver.]
 
-https://sekanndopuro-code.github.io/Malody-tools/consendation_merge
+https://sekanndopuro-code.github.io/Malody-tools/condensation_merge
 
 自分用に作ったやつなので色々がばいです。AIが残していったMalodyの仕様を履き違えた文言がたまにあります。
