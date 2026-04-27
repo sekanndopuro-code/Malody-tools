@@ -504,12 +504,12 @@ function processMC() {
                         data.effect.push({ beat: scroll1Beat, scroll: 60 });
                     }
 
-                    let jumpBeat = beatAdd(mainBeat, [0, 1, 16]);
+                    let jumpBeat = beatAdd(mainBeat, [0, 1, 12]);
                     if (!hasEffect(data.effect, jumpBeat, "jump", 9999999)) {
                         data.effect.push({ beat: jumpBeat, jump: 9999999 });
                     }
 
-                    let scroll2Beat = beatAdd(mainBeat,[0, 1001, 16000]);
+                    let scroll2Beat = beatAdd(mainBeat,[0, 1001, 12000]);
                     if (!hasEffect(data.effect, scroll2Beat, "scroll", 0.3)) {
                         data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
                     }
