@@ -62,6 +62,14 @@
     </div>
 
     <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+
+    <div class="form-group" style="margin-bottom: 20px; background: #e8f4f8; padding: 15px; border-radius: 8px; border: 1px solid #b8daff;">
+        <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 0;">
+            <input type="checkbox" id="autoEffectsToggle" checked style="width: auto; margin-right: 10px; transform: scale(1.3);">
+            エフェクト（scroll: 30, jump: 9999999, scroll: 0.3）を自動配置する
+        </label>
+    </div>
+
     <button type="button" class="btn-process" onclick="processMC()">⚡ 縮合結合を実行</button>
 
     <div id="resultMsg"></div>
@@ -138,7 +146,6 @@ function getRelXAt(mainPoints, targetPoint) {
     if (mainPoints.length === 1) return mainPoints[0].x;
     if (targetPoint <= mainPoints[0].point) return mainPoints[0].x;
     if (targetPoint >= mainPoints[mainPoints.length - 1].point) return mainPoints[mainPoints.length - 1].x;
-    
     for (let i = 0; i < mainPoints.length - 1; i++) {
         let p1 = mainPoints[i];
         let p2 = mainPoints[i+1];
@@ -178,7 +185,7 @@ function beatDiff(beat1, beat2) {
     const num2 = (m2 * d2 + n2) * d1;
     const den = d1 * d2;
     let diffNum = num1 - num2;
-    if (diffNum < 0) diffNum = 0; 
+    if (diffNum < 0) diffNum = 0;
     const m = Math.floor(diffNum / den);
     const n = diffNum % den;
     if (n === 0) return [m, 0, 1];
@@ -242,7 +249,6 @@ function fixDuplicateSegs(segArray) {
         let p = beatToPoint(segItem.beat);
         let conflictCount = 0;
         let currentP = p;
-        
         while (true) {
             let isConflict = false;
             for (let j = 0; j < usedPoints.length; j++) {
@@ -269,7 +275,6 @@ function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
-    
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
     dlLink.style.display = "none";
@@ -281,13 +286,11 @@ function processMC() {
 
     const rangeGroups = document.querySelectorAll('.range-group');
     const ranges =[];
-    
     for (let i = 0; i < rangeGroups.length; i++) {
         const startStr = rangeGroups[i].querySelector('.startBeat').value;
         const endStr = rangeGroups[i].querySelector('.endBeat').value;
         const startBeat = parseBeat(startStr);
         const endBeat = parseBeat(endStr);
-        
         if (!startBeat || !endBeat) {
             msgDiv.style.color = "#d32f2f";
             return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
@@ -304,7 +307,6 @@ function processMC() {
 
     const file = fileInput.files[0];
     const reader = new FileReader();
-    
     reader.onload = function(e) {
         try {
             let rawStr = e.target.result;
@@ -323,7 +325,6 @@ function processMC() {
             let allDeletedNotes = new Set();
             let totalJoinedCount = 0;
             let resultLogs =[];
-
             for (let r = 0; r < ranges.length; r++) {
                 const range = ranges[r];
                 const targetSlides =[];
@@ -349,10 +350,8 @@ function processMC() {
                 const mainSlide = targetSlides[0];
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
-
                 // 幹のsegは絶対に変更せずそのまま保持する
                 let mainOriginalSegs = mainSlide.seg ||[];
-
                 // ★幹の軌道ポイント配列（分岐点の座標計算用）
                 let mainPoints = [ { beat: [0,0,0], point: 0, x: 0 } ];
                 for (let s of mainOriginalSegs) {
@@ -371,10 +370,8 @@ function processMC() {
                         const offsetX = branchX - mainX;
                         
                         const origOffsetBeat = beatDiff(branch.beat, mainBeat);
-                        
                         // 1/100 圧縮 ＋ 1/99 シフト
                         const compOffsetBeat = beatAdd(shiftBaseBeat, beatDiv(origOffsetBeat, 100));
-
                         branchEvents.push({
                             compOffsetBeat: compOffsetBeat,
                             branchSegs: branchSegs,
@@ -384,7 +381,6 @@ function processMC() {
                 }
 
                 branchEvents.sort((a, b) => beatToPoint(a.compOffsetBeat) - beatToPoint(b.compOffsetBeat));
-
                 const newSeg =[];
 
                 // ★ 枝の往復ブロック (幹の現在座標 trunkX を計算して分岐・帰還する)
@@ -393,11 +389,9 @@ function processMC() {
                     let trunkX = Math.floor(getRelXAt(mainPoints, evStart));
 
                     // 1. 幹の現在座標 (時間は始点)
-                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
-
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX });
                     // 2. 枝の始点 (時間は始点)
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
-
                     // 3. 往路 (圧縮して追加)
                     for (let j = 0; j < ev.branchSegs.length; j++) {
                         let s = ev.branchSegs[j];
@@ -414,9 +408,8 @@ function processMC() {
                     
                     // 5. 枝の始点 (時間は始点)
                     newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
-
                     // 6. 幹の現在座標に戻る (時間は始点)
-                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX });
                 }
 
                 // ★ 最後に幹スライド本体のsegを「そのまま」の形・タイミングでくっつける ★
@@ -436,18 +429,22 @@ function processMC() {
                 totalJoinedCount += targetSlides.length;
                 let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
                 resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/100 縮合結合しました${fixMsg}</span>`);
-
+                
                 // ==========================================
                 // ★ ScrollエフェクトとJumpエフェクトの自動配置
                 // ==========================================
-                let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
-                data.effect.push({ beat: scroll1Beat, scroll: 30 });
+                const isAutoEffectsEnabled = document.getElementById("autoEffectsToggle").checked;
+                
+                if (isAutoEffectsEnabled) {
+                    let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
+                    data.effect.push({ beat: scroll1Beat, scroll: 30 });
 
-                let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
-                data.effect.push({ beat: jumpBeat, jump: 9999999 });
+                    let jumpBeat = beatAdd(mainBeat, [0, 1, 4]);
+                    data.effect.push({ beat: jumpBeat, jump: 9999999 });
 
-                let scroll2Beat = beatAdd(mainBeat, [0, 1001, 4000]);
-                data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
+                    let scroll2Beat = beatAdd(mainBeat, [0, 1001, 4000]);
+                    data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
+                }
             }
 
             if (totalJoinedCount === 0) {
@@ -467,11 +464,9 @@ function processMC() {
             let dotIndex = originalName.lastIndexOf('.');
             if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
             dlLink.download = originalName + "_condensed.mc";
-            
             dlLink.style.display = "block";
             
             msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
-
         } catch (err) {
             console.error(err);
             msgDiv.style.color = "#d32f2f";
