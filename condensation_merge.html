@@ -32,6 +32,7 @@
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
+        .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -48,6 +49,7 @@
         <input type="file" id="mcFile" accept="*/*">
     </div>
 
+    <!-- エフェクトの自動配置オンオフ機能 -->
     <div class="toggle-group">
         <label>
             <input type="checkbox" id="autoEffectToggle" checked>
@@ -122,6 +124,8 @@ function updateRangeLabels() {
     });
 }
 
+function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+
 function safeBeat(beat) {
     if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
     return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
@@ -137,17 +141,22 @@ function parseBeat(str) {
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const parts = str.match(/-?\d+/g);
     if (parts && parts.length >= 3) {
-        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+        return[Number(parts[0]), Number(parts[1]), Number(parts[2])];
     }
     return null;
 }
 
+// ========================================================
+// 幹の現在X座標を計算する関数
+// ========================================================
 function getRelXAt(mainPoints, targetPoint) {
     if (mainPoints.length === 1) return mainPoints[0].x;
     if (targetPoint <= mainPoints[0].point) return mainPoints[0].x;
     if (targetPoint >= mainPoints[mainPoints.length - 1].point) return mainPoints[mainPoints.length - 1].x;
+    
     for (let i = 0; i < mainPoints.length - 1; i++) {
-        let p1 = mainPoints[i], p2 = mainPoints[i+1];
+        let p1 = mainPoints[i];
+        let p2 = mainPoints[i+1];
         if (p1.point <= targetPoint && targetPoint <= p2.point) {
             if (Math.abs(p2.point - p1.point) < 1e-10) return p2.x;
             let t = (targetPoint - p1.point) / (p2.point - p1.point);
@@ -157,106 +166,171 @@ function getRelXAt(mainPoints, targetPoint) {
     return mainPoints[mainPoints.length - 1].x;
 }
 
+// ========================================================
+// エフェクト重複判定関数（同じ座標で同じ値が存在するか）
+// ========================================================
 function hasEffect(effectArray, targetBeat, propName, propValue) {
     const targetPoint = beatToPoint(targetBeat);
     for (let i = 0; i < effectArray.length; i++) {
         const e = effectArray[i];
         if (e[propName] === propValue && e.beat) {
-            if (Math.abs(beatToPoint(e.beat) - targetPoint) < 1e-6) return true;
+            const ePoint = beatToPoint(e.beat);
+            // 微小な誤差を許容して一致判定 (1e-6)
+            if (Math.abs(ePoint - targetPoint) < 1e-6) {
+                return true;
+            }
         }
     }
     return false;
 }
 
 // ========================================================
-// ★ 究極改善：Malodyの「分母 65535 制限」をクリアしつつ、重複回避を一切行わない完全な分数エンジン
+// ★ 連分数展開(Farey)を用いた高精度な分数近似
 // ========================================================
-function gcdBig(a, b) {
-    a = a < 0n ? -a : a;
-    b = b < 0n ? -b : b;
-    while (b !== 0n) { let t = b; b = a % b; a = t; }
-    return a;
-}
+function limitDenom(beat, maxDenom = 100000) {
+    let m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
+    if (n === 0) return [m, 0, 1];
+    
+    if (d < 0) { n = -n; d = -d; }
+    if (n < 0) { 
+        let shift = Math.floor(-n / d) + 1;
+        m -= shift; n += shift * d;
+    }
+    if (n >= d) {
+        let shift = Math.floor(n / d);
+        m += shift; n -= shift * d;
+    }
+    if (n === 0) return[m, 0, 1];
 
-function fareyApprox(m, n, d, maxDenom) {
-    let val = Number(n) / Number(d);
-    let n0 = 0n, d0 = 1n, n1 = 1n, d1 = 0n;
+    let g = Math.abs(gcd(n, d));
+    n /= g; d /= g;
+    if (d <= maxDenom) return[m, n, d];
+
+    let val = n / d;
+    let n0 = 0, d0 = 1, n1 = 1, d1 = 0;
     let num = n, den = d;
     
-    while (den !== 0n) {
-        let a = num / den;
+    while (den !== 0) {
+        let a = Math.floor(num / den);
         let rem = num % den;
         let n2 = n0 + a * n1;
         let d2 = d0 + a * d1;
         
         if (d2 > maxDenom) {
-            let k = (maxDenom - d0) / d1;
+            let k = Math.floor((maxDenom - d0) / d1);
             let n_alt = n0 + k * n1;
             let d_alt = d0 + k * d1;
             
-            let err1 = Math.abs(val - Number(n1)/Number(d1));
-            let err2 = Math.abs(val - Number(n_alt)/Number(d_alt));
-            if (err2 <= err1 && d_alt > 0n) {
-                return [Number(m), Number(n_alt), Number(d_alt)];
+            let err1 = Math.abs(val - n1 / d1);
+            let err2 = Math.abs(val - n_alt / d_alt);
+            if (err2 < err1 && d_alt > 0) {
+                return[m, n_alt, d_alt];
             } else {
-                return [Number(m), Number(n1), Number(d1)];
+                return[m, n1, d1];
             }
         }
+        
         n0 = n1; d0 = d1;
         n1 = n2; d1 = d2;
         num = den; den = rem;
     }
-    return[Number(m), Number(n1), Number(d1)];
-}
-
-function exactFormat(m, n, d) {
-    if (n === 0n) return [Number(m), 0, 1];
-    if (d < 0n) { n = -n; d = -d; }
-    if (n < 0n) { let shift = (-n) / d + 1n; m -= shift; n += shift * d; }
-    if (n >= d) { let shift = n / d; m += shift; n -= shift * d; }
-    if (n === 0n) return[Number(m), 0, 1];
-    
-    let g = gcdBig(n, d);
-    n /= g; d /= g;
-    
-    // Malodyの限界(65535)を超えた場合のみ安全な近似を行う。1/6の計算などはこれに引っかからず完璧に出力されます。
-    if (d > 65535n) {
-        return fareyApprox(m, n, d, 65535n);
-    }
-    
-    return [Number(m), Number(n), Number(d)];
+    return[m, n1, d1];
 }
 
 function beatDiff(beat1, beat2) {
-    if (!beat1) return[0, 0, 0];
+    if (!beat1) return [0, 0, 0];
     if (!beat2) return [...beat1];
-    let m1 = BigInt(beat1[0]), n1 = BigInt(beat1[1] || 0), d1 = BigInt(beat1[2] || 1);
-    let m2 = BigInt(beat2[0]), n2 = BigInt(beat2[1] || 0), d2 = BigInt(beat2[2] || 1);
-    let lcm = (d1 / gcdBig(d1, d2)) * d2;
-    let num1 = m1 * lcm + n1 * (lcm / d1);
-    let num2 = m2 * lcm + n2 * (lcm / d2);
+    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
+    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    const num1 = (m1 * d1 + n1) * d2;
+    const num2 = (m2 * d2 + n2) * d1;
+    const den = d1 * d2;
     let diffNum = num1 - num2;
-    if (diffNum < 0n) diffNum = 0n;
-    return exactFormat(0n, diffNum, lcm);
+    if (diffNum < 0) diffNum = 0; 
+    const m = Math.floor(diffNum / den);
+    const n = diffNum % den;
+    if (n === 0) return[m, 0, 1];
+    return limitDenom([m, n, den]);
 }
 
 function beatAdd(beat1, beat2) {
-    if (!beat1) return[...beat2];
+    if (!beat1) return [...beat2];
     if (!beat2) return [...beat1];
-    let m1 = BigInt(beat1[0]), n1 = BigInt(beat1[1] || 0), d1 = BigInt(beat1[2] || 1);
-    let m2 = BigInt(beat2[0]), n2 = BigInt(beat2[1] || 0), d2 = BigInt(beat2[2] || 1);
-    let lcm = (d1 / gcdBig(d1, d2)) * d2;
-    let num = n1 * (lcm / d1) + n2 * (lcm / d2);
-    return exactFormat(m1 + m2, num, lcm);
+    const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
+    const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
+    const num1 = n1 * d2;
+    const num2 = n2 * d1;
+    const den = d1 * d2;
+    let num = num1 + num2;
+    let m = m1 + m2 + Math.floor(num / den);
+    let n = num % den;
+    if (n === 0) return[m, 0, 1];
+    return limitDenom([m, n, den]);
 }
 
 function beatDiv(beat, divisor) {
     if (!beat) return[0, 0, 1];
-    let m = BigInt(beat[0]), n = BigInt(beat[1] || 0), d = BigInt(beat[2] || 1);
-    let div = BigInt(divisor);
-    let num = m * d + n;
-    let den = d * div;
-    return exactFormat(0n, num, den);
+    const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : (beat[2] || 1);
+    const num = m * d + n;
+    const den = d * divisor;
+    if (num === 0) return[0, 0, 1];
+    let newM = Math.floor(num / den);
+    let newN = num % den;
+    if (newN === 0) return [newM, 0, 1];
+    return limitDenom([newM, newN, den]);
+}
+
+// ========================================================
+// 重複パトロール (順序は一切変更せず、被りがある場合のみ回避)
+// ========================================================
+function fixDuplicateSegs(segArray) {
+    let usedPoints =[];
+    let fixedCount = 0;
+    const MICRO_DEN = 100000; 
+    
+    function addMicroOffset(beat, offsetCount) {
+        if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
+        let b = beatAdd(beat,[0, offsetCount, MICRO_DEN]);
+        return limitDenom(b); 
+    }
+
+    for (let i = 0; i < segArray.length; i++) {
+        if (segArray[i].isMain) {
+            usedPoints.push(beatToPoint(segArray[i].beat));
+        }
+    }
+
+    for (let i = 0; i < segArray.length; i++) {
+        let segItem = segArray[i];
+        if (segItem.isMain) {
+            delete segItem.isMain; 
+            continue;
+        }
+
+        let p = beatToPoint(segItem.beat);
+        let conflictCount = 0;
+        let currentP = p;
+        
+        while (true) {
+            let isConflict = false;
+            for (let j = 0; j < usedPoints.length; j++) {
+                if (Math.abs(currentP - usedPoints[j]) < 1e-5) {
+                    isConflict = true;
+                    break;
+                }
+            }
+            if (!isConflict) break;
+            conflictCount++;
+            currentP = p + (conflictCount / MICRO_DEN);
+        }
+        
+        if (conflictCount > 0) {
+            segItem.beat = addMicroOffset(segItem.beat, conflictCount);
+            fixedCount++;
+        }
+        usedPoints.push(currentP);
+    }
+    return fixedCount;
 }
 
 function processMC() {
@@ -290,7 +364,11 @@ function processMC() {
         
         const startPoint = beatToPoint(startBeat);
         const endPoint = beatToPoint(endBeat);
-        ranges.push({ index: i + 1, min: Math.min(startPoint, endPoint), max: Math.max(startPoint, endPoint) });
+        ranges.push({
+            index: i + 1,
+            min: Math.min(startPoint, endPoint),
+            max: Math.max(startPoint, endPoint)
+        });
     }
 
     const file = fileInput.files[0];
@@ -306,7 +384,9 @@ function processMC() {
                 msgDiv.style.color = "#d32f2f";
                 return msgDiv.innerHTML = "無効な譜面データです。";
             }
-            if (!data.effect || !Array.isArray(data.effect)) data.effect =[];
+            if (!data.effect || !Array.isArray(data.effect)) {
+                data.effect =[];
+            }
 
             const notes = data.note;
             let allDeletedNotes = new Set();
@@ -339,14 +419,15 @@ function processMC() {
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
-                let mainOriginalSegs = mainSlide.seg || [];
-                let mainPoints = [{ beat:[0,0,1], point: 0, x: 0 }];
+                let mainOriginalSegs = mainSlide.seg ||[];
+
+                let mainPoints = [{ beat: [0,0,1], point: 0, x: 0 }];
                 for (let s of mainOriginalSegs) {
                     mainPoints.push({ beat: s.beat, point: beatToPoint(s.beat), x: s.x });
                 }
 
                 let branches = targetSlides.slice(1);
-                const shiftBaseBeat = [0, 1, 99];
+                const shiftBaseBeat =[0, 1, 99];
                 let branchEvents =[];
                 
                 if (branches.length > 0) {
@@ -370,8 +451,9 @@ function processMC() {
 
                 branchEvents.sort((a, b) => beatToPoint(a.compOffsetBeat) - beatToPoint(b.compOffsetBeat));
 
-                let newSeg =[];
+                const newSeg =[];
 
+                // 枝の往復ブロック
                 for (let ev of branchEvents) {
                     let evStart = beatToPoint(ev.compOffsetBeat);
                     let trunkX = Math.floor(getRelXAt(mainPoints, evStart));
@@ -391,15 +473,18 @@ function processMC() {
                         newSeg.push({ beat: beatAdd(ev.compOffsetBeat, compSegBeat), x: ev.offsetX + s.x });
                     }
                     
-                    newSeg.push({ beat: [...ev.compOffsetBeat], x: ev.offsetX });
-                    newSeg.push({ beat: [...ev.compOffsetBeat], x: trunkX }); 
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: ev.offsetX });
+                    newSeg.push({ beat:[...ev.compOffsetBeat], x: trunkX }); 
                 }
 
+                // 幹スライド本体
                 for (let s of mainOriginalSegs) {
-                    newSeg.push(JSON.parse(JSON.stringify(s)));
+                    let mainSegClone = JSON.parse(JSON.stringify(s));
+                    mainSegClone.isMain = true; 
+                    newSeg.push(mainSegClone);
                 }
 
-                // 余計な処理は一切せず、純粋な計算結果をそのまま代入
+                let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
                 
                 for (let i = 0; i < branches.length; i++) {
@@ -407,20 +492,24 @@ function processMC() {
                 }
                 
                 totalJoinedCount += targetSlides.length;
-                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を完全精度で縮合しました</span>`);
+                let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
+                resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/200 縮合結合しました${fixMsg}</span>`);
 
+                // ==========================================
+                // ★ ScrollエフェクトとJumpエフェクトの自動配置 (重複防止つき)
+                // ==========================================
                 if (isAutoEffect) {
-                    let scroll1Beat = beatAdd(mainBeat, [0, 1, 99]);
+                    let scroll1Beat = beatAdd(mainBeat,[0, 1, 99]);
                     if (!hasEffect(data.effect, scroll1Beat, "scroll", 60)) {
                         data.effect.push({ beat: scroll1Beat, scroll: 60 });
                     }
 
-                    let jumpBeat = beatAdd(mainBeat, [0, 1, 8]);
+                    let jumpBeat = beatAdd(mainBeat, [0, 1, 16]);
                     if (!hasEffect(data.effect, jumpBeat, "jump", 9999999)) {
                         data.effect.push({ beat: jumpBeat, jump: 9999999 });
                     }
 
-                    let scroll2Beat = beatAdd(mainBeat, [0, 1001, 8000]);
+                    let scroll2Beat = beatAdd(mainBeat,[0, 1001, 16000]);
                     if (!hasEffect(data.effect, scroll2Beat, "scroll", 0.3)) {
                         data.effect.push({ beat: scroll2Beat, scroll: 0.3 });
                     }
