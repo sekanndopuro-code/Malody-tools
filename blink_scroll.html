@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>連続点滅Scrollジェネレーター</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .desc { font-size: 0.85em; color: #555; margin-top: -10px; margin-bottom: 20px; line-height: 1.4; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="file"], input[type="number"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        .note { font-size: 0.8em; color: #666; margin-top: 5px; display: block; line-height: 1.4; }
+        
+        .settings-group { background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffe0b2; }
+        .settings-title { font-weight: bold; margin-bottom: 10px; color: #e65100; font-size: 1em; }
+        .flex-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+        .flex-item { flex: 1; }
+        .fraction-input { display: flex; align-items: center; gap: 5px; }
+        .fraction-input input { width: 60px; text-align: center; }
+        
+        .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
+        .btn-add { background: #17a2b8; margin-bottom: 20px; }
+        .btn-add:hover { background: #138496; }
+        .btn-remove { background: #dc3545; padding: 8px 15px; margin-top: 5px; font-size: 0.9em; width: auto; float: right; }
+        .btn-remove:hover { background: #c82333; }
+        .btn-process { background: #ff9800; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(255, 152, 0, 0.3); }
+        .btn-process:hover { background: #e65100; }
+        
+        .clearfix::after { content: ""; clear: both; display: table; }
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
+        #dlLink:hover { background: #218838; }
+        #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
+        .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>✨ 連続点滅Scrollジェネレーター</h1>
+    <p class="desc">
+        指定範囲内に「超高速Scroll(480) ＋ 逆算巻戻し」のイベントを敷き詰め、<b>ノーツがチカチカ点滅するギミック</b>を自動生成します。
+    </p>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>📁 対象の .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <!-- 点滅ギミック設定 -->
+    <div class="settings-group">
+        <div class="settings-title">⚙️ 点滅ギミック設定</div>
+        
+        <div class="flex-row">
+            <div class="flex-item">
+                <label>ベースScroll値</label>
+                <input type="number" id="baseScroll" value="0.25" step="0.01">
+            </div>
+            <div class="flex-item">
+                <label>点滅の間隔 (小節)</label>
+                <div class="fraction-input">
+                    <input type="number" id="intNum" value="1" min="1">
+                    <span style="font-weight:bold;">/</span>
+                    <input type="number" id="intDen" value="8" min="1">
+                </div>
+            </div>
+        </div>
+        <span class="note">※ノーツを弾き飛ばす「480」のScroll値はプログラム内部で固定されており、戻り値（例：-479.75）はベース値から自動逆算されます。</span>
+    </div>
+
+    <div id="rangesContainer">
+        <div class="range-group clearfix" id="range-0">
+            <h4>範囲 1</h4>
+            <div class="form-group">
+                <label>始点Beat</label>
+                <input type="text" class="startBeat" placeholder="例: 398, 0, 1">
+            </div>
+            <div class="form-group">
+                <label>終点Beat</label>
+                <input type="text" class="endBeat" placeholder="例: 400, 0, 1">
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('range-0')">🗑️ 削除</button>
+        </div>
+    </div>
+
+    <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    <button type="button" class="btn-process" onclick="processMC()">🚀 点滅エフェクトを生成</button>
+
+    <div id="resultMsg"></div>
+    <a id="dlLink" href="#">💾 エフェクト追加済みファイルをダウンロード</a>
+</div>
+
+<script>
+let rangeIdCounter = 1;
+
+function addRange() {
+    const container = document.getElementById("rangesContainer");
+    const id = "range-" + rangeIdCounter++;
+    const html = `
+    <div class="range-group clearfix" id="${id}">
+        <h4>範囲指定</h4>
+        <div class="form-group">
+            <label>始点Beat</label>
+            <input type="text" class="startBeat" placeholder="例: 398, 0, 1">
+        </div>
+        <div class="form-group">
+            <label>終点Beat</label>
+            <input type="text" class="endBeat" placeholder="例: 400, 0, 1">
+        </div>
+        <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+    </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    updateRangeLabels();
+}
+
+function removeRange(id) {
+    const container = document.getElementById("rangesContainer");
+    if (container.children.length <= 1) {
+        alert("最低でも1つの範囲指定が必要です！");
+        return;
+    }
+    document.getElementById(id).remove();
+    updateRangeLabels();
+}
+
+function updateRangeLabels() {
+    const groups = document.querySelectorAll('.range-group h4');
+    groups.forEach((el, index) => {
+        el.innerText = `範囲 ${index + 1}`;
+    });
+}
+
+function safeBeat(beat) {
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return[0, 0, 1];
+    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
+}
+
+function beatToPoint(beat) {
+    let b = safeBeat(beat);
+    return b[0] + (b[1] / b[2]);
+}
+
+function parseBeat(str) {
+    if (!str) return null;
+    str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const parts = str.match(/-?\d+/g);
+    if (parts && parts.length >= 3) {
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    }
+    return null;
+}
+
+function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+
+// 点滅ギミック用に、小数を正確なBeat配列にスナップさせる関数
+// (点滅間隔の分母の3倍が基準のグリッドになります)
+function pointToBeatExact(point, baseDen) {
+    let m = Math.floor(point + 1e-6);
+    let frac = point - m;
+    let den = baseDen * 3;
+    let num = Math.round(frac * den);
+    if (num === 0) return [m, 0, 0];
+    if (num === den) return [m + 1, 0, 0];
+    let g = gcd(num, den);
+    return [m, num / g, den / g];
+}
+
+function processMC() {
+    const fileInput = document.getElementById("mcFile");
+    const baseScroll = parseFloat(document.getElementById("baseScroll").value);
+    const intNum = parseInt(document.getElementById("intNum").value);
+    const intDen = parseInt(document.getElementById("intDen").value);
+    
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlLink");
+    
+    msgDiv.innerHTML = "";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "ファイルを選択してください。";
+    }
+
+    if (isNaN(baseScroll) || isNaN(intNum) || isNaN(intDen) || intDen <= 0 || intNum <= 0) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "点滅ギミック設定の数値が正しくありません。";
+    }
+
+    const rangeGroups = document.querySelectorAll('.range-group');
+    const ranges =[];
+    
+    for (let i = 0; i < rangeGroups.length; i++) {
+        const startStr = rangeGroups[i].querySelector('.startBeat').value;
+        const endStr = rangeGroups[i].querySelector('.endBeat').value;
+        const startBeat = parseBeat(startStr);
+        const endBeat = parseBeat(endStr);
+        
+        if (!startBeat || !endBeat) {
+            msgDiv.style.color = "#d32f2f";
+            return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
+        }
+        
+        const startPoint = beatToPoint(startBeat);
+        const endPoint = beatToPoint(endBeat);
+        ranges.push({
+            index: i + 1,
+            min: Math.min(startPoint, endPoint),
+            max: Math.max(startPoint, endPoint)
+        });
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            let rawStr = e.target.result;
+            let cleanStr = rawStr.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            
+            if (!data.effect || !Array.isArray(data.effect)) {
+                data.effect =[];
+            }
+
+            let logTexts =[];
+            let totalAdded = 0;
+
+            // 固定のジャンプ値
+            const JUMP_SCROLL = 480;
+            const RETURN_SCROLL = parseFloat((baseScroll - JUMP_SCROLL).toFixed(6));
+
+            // 1回の点滅サイクル(小節)の長さと、3等分したステップ幅
+            const cyclePoint = intNum / intDen;
+            const stepPoint = cyclePoint / 3;
+
+            // 1. 指定範囲内にある既存のScrollイベントを一旦除去する（安全に上書きするため）
+            let newEffects =[];
+            for (let ev of data.effect) {
+                let keep = true;
+                if (ev.scroll !== undefined) {
+                    let p = beatToPoint(safeBeat(ev.beat));
+                    for (let r of ranges) {
+                        if (p >= r.min - 1e-5 && p <= r.max + 1e-5) {
+                            keep = false; // 範囲内のScrollは削除
+                            break;
+                        }
+                    }
+                }
+                if (keep) {
+                    newEffects.push(ev);
+                }
+            }
+
+            // 2. 指定範囲ごとに点滅Scrollイベントを生成して追加
+            for (let r of ranges) {
+                let currentPoint = r.min;
+                let countInRange = 0;
+
+                // 終点を超えるまでサイクルを繰り返す
+                while (currentPoint <= r.max + 1e-5) {
+                    
+                    // ① ベースScroll
+                    if (currentPoint <= r.max + 1e-5) {
+                        newEffects.push({
+                            beat: pointToBeatExact(currentPoint, intDen),
+                            scroll: baseScroll
+                        });
+                        countInRange++;
+                    }
+
+                    // ② 超高速ジャンプ (480)
+                    let p2 = currentPoint + stepPoint;
+                    if (p2 <= r.max + 1e-5) {
+                        newEffects.push({
+                            beat: pointToBeatExact(p2, intDen),
+                            scroll: JUMP_SCROLL
+                        });
+                        countInRange++;
+                    }
+
+                    // ③ 逆算戻り (baseScroll - 480)
+                    let p3 = currentPoint + stepPoint * 2;
+                    if (p3 <= r.max + 1e-5) {
+                        newEffects.push({
+                            beat: pointToBeatExact(p3, intDen),
+                            scroll: RETURN_SCROLL
+                        });
+                        countInRange++;
+                    }
+
+                    // 次のサイクルへ
+                    currentPoint += cyclePoint;
+                }
+                
+                totalAdded += countInRange;
+                logTexts.push(`<span style="color:#28a745;">✅ 範囲 ${r.index}: ${countInRange}個のScrollイベントを配置しました</span>`);
+            }
+
+            // 時間順にソートして適用
+            newEffects.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+            data.effect = newEffects;
+
+            const outJson = JSON.stringify(data); 
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            
+            dlLink.href = url;
+            let originalName = file.name;
+            let dotIndex = originalName.lastIndexOf('.');
+            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
+            dlLink.download = originalName + "_blinking.mc";
+            
+            dlLink.style.display = "block";
+            
+            msgDiv.style.color = "#28a745";
+            msgDiv.innerHTML = `<b>🎉 生成完了！ 合計 ${totalAdded} 個の点滅Scrollを書き込みました！</b><br>
+            <div class="log-box">${logTexts.join("<br>")}</div>`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = `<b>ファイルの解析に失敗しました。</b><br>
+            <div class="log-box error-log">エラー詳細：<br>${err.message}</div>`;
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
+
+</body>
+</html>
