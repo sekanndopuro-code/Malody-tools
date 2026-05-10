@@ -45,7 +45,7 @@ https://sekanndopuro-code.github.io/Malody-tools/shreddedmerge
 https://sekanndopuro-code.github.io/Malody-tools/storage
 
 
-[segmismatch縮小結合ver.]
+[segmismatch縮小結合ver]
 
 https://sekanndopuro-code.github.io/Malody-tools/condensation_merge
 
