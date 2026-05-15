@@ -152,6 +152,15 @@ function parseBeat(str) {
     return (parts && parts.length >= 3) ? [Number(parts[0]), Number(parts[1]), Number(parts[2])] : null;
 }
 
+// 保存ボタンセットアップ（モバイルでの拡張子問題を回避するため、MIMEタイプを指定可能に変更）
+function setupDL(id, content, filename, mimeType = "application/octet-stream") {
+    const el = document.getElementById(id);
+    const blob = new Blob([content], { type: mimeType });
+    el.href = URL.createObjectURL(blob);
+    el.download = filename;
+    el.style.display = "block";
+}
+
 // 保管モード
 function exportData() {
     const mcFileInput = document.getElementById("mcFile");
@@ -188,24 +197,18 @@ function exportData() {
             document.getElementById("exportText").value = outTxt;
             document.getElementById("exportResult").style.display = "block";
 
-            const name = mcFileInput.files[0].name.replace(".mc", "");
-            setupDL("dlExportTxtLink", outTxt, name + "_backup.txt");
+            const name = mcFileInput.files[0].name.replace(/\.mc$/i, "");
+            
+            // backupはテキスト形式なので text/plain、.mcは application/octet-stream を指定して拡張子変更を防止
+            setupDL("dlExportTxtLink", outTxt, name + "_backup.txt", "text/plain");
             data.note = remaining;
-            setupDL("dlExportMcLink", JSON.stringify(data), name + "_light.mc");
+            setupDL("dlExportMcLink", JSON.stringify(data), name + "_light.mc", "application/octet-stream");
 
             msgDiv.style.color = "#28a745";
             msgDiv.innerHTML = `✅ ${extracted.length} 個のスライドを保管しました！`;
         } catch(err) { alert("解析失敗: " + err); }
     };
     reader.readAsText(mcFileInput.files[0]);
-}
-
-function setupDL(id, content, filename) {
-    const el = document.getElementById(id);
-    const blob = new Blob([content], { type: "text/plain" });
-    el.href = URL.createObjectURL(blob);
-    el.download = filename;
-    el.style.display = "block";
 }
 
 function copyExportText() {
@@ -256,7 +259,8 @@ async function restoreData() {
 
         data.note.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
         
-        setupDL("dlRestoreLink", JSON.stringify(data), mcFileInput.files[0].name.replace(".mc", "") + "_restored.mc");
+        // 拡張子が txt になるのを防ぐために "application/octet-stream" を指定
+        setupDL("dlRestoreLink", JSON.stringify(data), mcFileInput.files[0].name.replace(/\.mc$/i, "") + "_restored.mc", "application/octet-stream");
         msgDiv.style.color = "#e65100";
         msgDiv.innerHTML = `🛠️ 復元完了！計 ${restoredCount} 個のスライドを挿入しました。`;
     } catch(err) { 
