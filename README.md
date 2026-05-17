@@ -40,7 +40,7 @@ https://sekanndopuro-code.github.io/Malody-tools/shimashima2delay
 https://sekanndopuro-code.github.io/Malody-tools/shreddedmerge
 
 
-[敷スライド保管所]
+[配置保管所]
 
 https://sekanndopuro-code.github.io/Malody-tools/storage
 
