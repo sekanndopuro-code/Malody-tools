@@ -49,4 +49,7 @@ https://sekanndopuro-code.github.io/Malody-tools/storage
 
 https://sekanndopuro-code.github.io/Malody-tools/condensation_merge
 
+
+https://sekanndopuro-code.github.io/Malody-tools/joinslides
+
 自分用に作ったやつなので色々がばいです。AIが残していったMalodyの仕様を履き違えた文言がたまにあります。
