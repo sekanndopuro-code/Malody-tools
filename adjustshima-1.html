@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Malody シマシマ演出自動調整ツール</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f5f7; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.2rem; border-bottom: 2px solid #5b9bd5; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
+        input[type="number"] { width: 60px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .beat-input { display: flex; gap: 5px; align-items: center; }
+        .beat-input span { font-weight: bold; }
+        input[type="file"] { display: block; margin-bottom: 20px; font-size: 1rem; }
+        button { background: #5b9bd5; color: white; border: none; padding: 12px 20px; font-size: 1rem; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; }
+        button:hover { background: #4a84b8; }
+        #log { margin-top: 20px; font-size: 0.85rem; color: #d9534f; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>シマシマ演出 自動調整ツール</h1>
+    
+    <div class="form-group">
+        <label>1. .mcファイルを選択</label>
+        <input type="file" id="fileInput" accept=".mc">
+    </div>
+
+    <div class="form-group">
+        <label>2. 基準となるBPM (等速)</label>
+        <input type="number" id="baseBpm" value="260" step="0.1" style="width: 100px;">
+    </div>
+
+    <div class="form-group">
+        <label>3. 調整する範囲の始点 (beat)</label>
+        <div class="beat-input">
+            <input type="number" id="startA" value="0"> <span>,</span>
+            <input type="number" id="startB" value="0"> <span>,</span>
+            <input type="number" id="startC" value="4">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>4. 調整する範囲の終点 (beat)</label>
+        <div class="beat-input">
+            <input type="number" id="endA" value="10"> <span>,</span>
+            <input type="number" id="endB" value="0"> <span>,</span>
+            <input type="number" id="endC" value="4">
+        </div>
+    </div>
+
+    <button onclick="processFile()">変換してダウンロード</button>
+
+    <div id="log"></div>
+</div>
+
+<script>
+// Malodyのbeat配列 [measure, beat, divisor] を絶対値（小節単位）に変換する関数
+function toAbsBeat(beat) {
+    if (!beat || beat.length < 3) return 0;
+    return beat[0] + (beat[1] / beat[2]);
+}
+
+// 絶対値からMalodyのbeat配列に復元する関数（解像度はMalodyで一般的な288に固定）
+function fromAbsBeat(abs) {
+    const DENOMINATOR = 288; 
+    let measure = Math.floor(abs + 0.000001); // 浮動小数点の誤差対策
+    let remainder = abs - measure;
+    let tick = Math.round(remainder * DENOMINATOR);
+    
+    if (tick >= DENOMINATOR) {
+        measure += 1;
+        tick -= DENOMINATOR;
+    }
+    return [measure, tick, DENOMINATOR];
+}
+
+// すでにソート済みのtimeEventsから、指定したbeat位置でのBPMを取得する関数
+function getBpmAtBeat(absBeat, sortedTimes, defaultBpm) {
+    let currentBpm = defaultBpm;
+    for (let i = 0; i < sortedTimes.length; i++) {
+        if (toAbsBeat(sortedTimes[i].beat) <= absBeat + 0.000001) {
+            currentBpm = sortedTimes[i].bpm;
+        } else {
+            break;
+        }
+    }
+    return currentBpm;
+}
+
+function processFile() {
+    const fileInput = document.getElementById('fileInput');
+    const log = document.getElementById('log');
+    log.innerHTML = "";
+
+    if (!fileInput.files.length) {
+        log.innerHTML = "エラー: mcファイルを選択してください。";
+        return;
+    }
+
+    const baseBpm = parseFloat(document.getElementById('baseBpm').value);
+    const startAbs = toAbsBeat([
+        parseInt(document.getElementById('startA').value),
+        parseInt(document.getElementById('startB').value),
+        parseInt(document.getElementById('startC').value)
+    ]);
+    const endAbs = toAbsBeat([
+        parseInt(document.getElementById('endA').value),
+        parseInt(document.getElementById('endB').value),
+        parseInt(document.getElementById('endC').value)
+    ]);
+
+    if (startAbs >= endAbs) {
+        log.innerHTML = "エラー: 終点は始点より後の位置に設定してください。";
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            let json = JSON.parse(e.target.result);
+            
+            // 【バグ①修正用】最初に対象のBPM配列を時間順にソートしておく
+            let sortedTimes = [...json.time].sort((a, b) => toAbsBeat(a.beat) - toAbsBeat(b.beat));
+
+            // 範囲内のノーツを取得 (終点は含まない: < endAbs)
+            let rangeNotes = json.note.filter(n => {
+                let abs = toAbsBeat(n.beat);
+                return abs >= startAbs && abs < endAbs;
+            });
+
+            if (rangeNotes.length < 2) {
+                log.innerHTML = "エラー: 範囲内にノーツが2つ以上見つかりません。";
+                return;
+            }
+
+            // ノーツを時間順にソート
+            rangeNotes.sort((a, b) => toAbsBeat(a.beat) - toAbsBeat(b.beat));
+            
+            // 最初のタイミングにある「全ての」ノーツをテンプレート化
+            let firstAbs = toAbsBeat(rangeNotes[0].beat);
+            let templateNotes = rangeNotes.filter(n => Math.abs(toAbsBeat(n.beat) - firstAbs) < 0.0001);
+
+            // 間隔を計算するため、次のタイミングにあるノーツを探す（同時押しをスキップ）
+            let nextBeatNote = rangeNotes.find(n => toAbsBeat(n.beat) - firstAbs > 0.0001);
+            if (!nextBeatNote) {
+                log.innerHTML = "エラー: 範囲内に異なるタイミングのノーツが見つからないため、間隔を計算できません。";
+                return;
+            }
+
+            let baseInterval = toAbsBeat(nextBeatNote.beat) - firstAbs;
+            let baseSegLen = (templateNotes[0].seg && templateNotes[0].seg.length > 0) ? toAbsBeat(templateNotes[0].seg[0].beat) : 0;
+
+            // 【バグ②修正】範囲内の古いノーツを削除 (取得条件に合わせて < endAbs に統一)
+            json.note = json.note.filter(n => {
+                let abs = toAbsBeat(n.beat);
+                return !(abs >= startAbs && abs < endAbs);
+            });
+
+            let currentAbs = startAbs;
+            let newNotes = [];
+            let safety = 0; 
+
+            while (currentAbs < endAbs) {
+                safety++;
+                // 【バグ③修正】安全装置が働いた場合は無言で抜けず、ユーザーに通知する
+                if (safety >= 10000) {
+                    log.innerHTML = "エラー: 処理が10000回を超えて中断されました。範囲が広すぎるか、BPM設定が異常な可能性があります。";
+                    return;
+                }
+                
+                let currentBpm = getBpmAtBeat(currentAbs, sortedTimes, baseBpm);
+                
+                // 【バグ①修正】ソート済みの配列から「現在位置の直後のBPM変化点」を確実に取得
+                let nextBpmEvent = sortedTimes.find(t => toAbsBeat(t.beat) > currentAbs + 0.0001);
+                let nextBpmBeat = nextBpmEvent ? toAbsBeat(nextBpmEvent.beat) : endAbs;
+                let limitBeat = Math.min(nextBpmBeat, endAbs);
+
+                let ratio = currentBpm / baseBpm;
+                let adjustedInterval = baseInterval * ratio;
+                let adjustedSegLen = baseSegLen * ratio;
+
+                if (adjustedInterval <= 0.0001) {
+                    currentAbs += 0.001;
+                    continue;
+                }
+
+                if (currentAbs + adjustedInterval <= limitBeat + 0.0001) {
+                    // テンプレート化された複数のノーツ（横並び）をすべて配置
+                    templateNotes.forEach(tn => {
+                        let newNote = JSON.parse(JSON.stringify(tn));
+                        newNote.beat = fromAbsBeat(currentAbs);
+                        if (newNote.seg && newNote.seg.length > 0) {
+                            newNote.seg[0].beat = fromAbsBeat(adjustedSegLen);
+                        }
+                        newNotes.push(newNote);
+                    });
+                    currentAbs += adjustedInterval;
+                } 
+                else {
+                    // 境界線をまたぐ前の最後のクリップ処理
+                    templateNotes.forEach(tn => {
+                        let newNote = JSON.parse(JSON.stringify(tn));
+                        newNote.beat = fromAbsBeat(currentAbs);
+                        if (newNote.seg && newNote.seg.length > 0) {
+                            let allowedSegLen = Math.min(adjustedSegLen, limitBeat - currentAbs);
+                            newNote.seg[0].beat = fromAbsBeat(allowedSegLen);
+                        }
+                        newNotes.push(newNote);
+                    });
+                    currentAbs = limitBeat;
+                }
+            }
+
+            // 統合とソート
+            json.note = json.note.concat(newNotes);
+            json.note.sort((a, b) => toAbsBeat(a.beat) - toAbsBeat(b.beat));
+
+            // ダウンロード処理
+            const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "modified_" + fileInput.files[0].name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            log.innerHTML = `<span style="color:green;">成功: ${newNotes.length} 個のノーツを生成し、隙間なく調整しました。</span>`;
+
+        } catch (err) {
+            log.innerHTML = "ファイルの処理中にエラーが発生しました: " + err.message;
+        }
+    };
+    reader.readAsText(fileInput.files[0]);
+}
+</script>
+</body>
+</html>
