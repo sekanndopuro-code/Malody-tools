@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>直列マージツール</title>
+    <title>スライド直列マージツール</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
         .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
@@ -40,10 +40,10 @@
 <body>
 
 <div class="container">
-    <h1>🔗 直列マージツール</h1>
+    <h1>🔗 スライド直列マージツール</h1>
     <p class="desc">
-        選択されたすべてのノーツ（Tap、Wipe、スライド等）を、順番通りに<b>1つの連続したスライド</b>に結合します。<br>
-        敷スライド（逆走・折り返し）も形を崩さずにそのまま結合できます。直角スライドの重複バグも自動で回避補正されます。
+        選択された<b>スライドノーツのみ</b>を、順番通りに<b>1つの連続したスライド</b>に結合します。<br>
+        Tap・Wipeなどの通常ノーツは対象外です。敷スライド（逆走・折り返し）も形を崩さずにそのまま結合できます。直角スライドの重複バグも自動で回避補正されます。
     </p>
     
     <div class="form-group" style="margin-bottom: 20px;">
@@ -329,12 +329,12 @@ function processMC() {
                 const group = parsedGroups[r];
                 const targetNotes =[];
 
-                // ★修正点：x座標を持つすべてのノーツ(スライド含む)を抽出
+                // ★スライドノーツのみ抽出（segを持つものだけが対象）
                 for (let i = 0; i < notes.length; i++) {
                     const note = notes[i];
                     if (allDeletedNotes.has(note)) continue;
 
-                    if (typeof note.x === 'number') {
+                    if (typeof note.x === 'number' && note.seg && Array.isArray(note.seg)) {
                         const point = beatToPoint(safeBeat(note.beat));
                         
                         if (group.type === "range") {
