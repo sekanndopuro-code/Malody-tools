@@ -305,28 +305,39 @@ function processMC() {
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
                 // 幹の補間用の座標配列を作成
-                let mainPoints =[ { point: 0, relX: 0 } ];
-                if (mainSlide.seg) {
-                    for (let s of mainSlide.seg) {
-                        mainPoints.push({ point: beatToPoint(s.beat), relX: s.x });
+                // ★ 折り返しスライド対応: 最初にsegのbeat順が逆行した時点で切り詰め、
+                //   それより前の部分のみを有効な幹（effectiveMainSegs）として扱う
+                let mainOriginalSegs = mainSlide.seg ||[];
+                let effectiveMainSegs =[];
+                {
+                    let prevSegPoint = 0;
+                    for (let i = 0; i < mainOriginalSegs.length; i++) {
+                        let p = beatToPoint(mainOriginalSegs[i].beat);
+                        if (p < prevSegPoint - 1e-10) break; // 逆行検知：ここで切り詰め
+                        effectiveMainSegs.push(mainOriginalSegs[i]);
+                        prevSegPoint = p;
                     }
+                }
+
+                let mainPoints =[ { point: 0, relX: 0 } ];
+                for (let s of effectiveMainSegs) {
+                    mainPoints.push({ point: beatToPoint(s.beat), relX: s.x });
                 }
 
                 let branches = targetSlides.slice(1);
                 let events =[];
                 
                 // メイン幹の「最後のseg」を判定の蓋として取り除いておく
-                let mainOriginalSegs = mainSlide.seg ||[];
                 let mainLastSeg = null;
                 let mainLastPoint = 0;
                 
-                if (mainOriginalSegs.length > 0) {
-                    mainLastSeg = mainOriginalSegs[mainOriginalSegs.length - 1];
+                if (effectiveMainSegs.length > 0) {
+                    mainLastSeg = effectiveMainSegs[effectiveMainSegs.length - 1];
                     mainLastPoint = beatToPoint(mainLastSeg.beat);
                     
                     // 最後以外の途中segを、一筆書きのイベントとして登録
-                    for (let i = 0; i < mainOriginalSegs.length - 1; i++) {
-                        let s = mainOriginalSegs[i];
+                    for (let i = 0; i < effectiveMainSegs.length - 1; i++) {
+                        let s = effectiveMainSegs[i];
                         events.push({
                             type: 'main_seg',
                             point: beatToPoint(s.beat),
