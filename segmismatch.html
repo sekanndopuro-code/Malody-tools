@@ -433,6 +433,13 @@ function processMC() {
                     newSeg.push({ beat: [...mainLastSeg.beat], x: mainLastSeg.x });
                 }
 
+                // ★ 折り返し装飾の復元: 元の幹スライドが折り返しスライドだった場合、
+                //   逆行開始以降のsegを蓋の後にそのまま追記する
+                let wrapBackSegs = mainOriginalSegs.slice(effectiveMainSegs.length);
+                for (let s of wrapBackSegs) {
+                    newSeg.push({ beat: [...s.beat], x: s.x });
+                }
+
                 // 重複バグ修復パトロール
                 let fixCount = fixDuplicateSegs(newSeg);
                 mainSlide.seg = newSeg;
