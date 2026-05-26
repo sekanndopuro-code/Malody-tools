@@ -28,13 +28,6 @@
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
-        .mode-toggle { background: #f0f4ff; border: 2px solid #c9d8ff; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
-        .mode-toggle p { margin: 0 0 10px 0; font-weight: bold; font-size: 0.9em; color: #334; }
-        .mode-option { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; cursor: pointer; }
-        .mode-option:last-child { margin-bottom: 0; }
-        .mode-option input[type="radio"] { margin-top: 3px; accent-color: #4a6cf7; flex-shrink: 0; }
-        .mode-option span { font-size: 0.85em; color: #444; line-height: 1.4; font-weight: normal; }
-        .mode-option span b { color: #222; font-size: 0.95em; }
     </style>
 </head>
 <body>
@@ -50,18 +43,6 @@
     <div class="form-group" style="margin-bottom: 20px;">
         <label>📁 .mcファイルを選択</label>
         <input type="file" id="mcFile" accept="*/*">
-    </div>
-
-    <div class="mode-toggle">
-        <p>🔀 折り返し幹の終点認識モード</p>
-        <label class="mode-option">
-            <input type="radio" name="trunkMode" value="maxBeat" checked>
-            <span><b>最大beatモード（デフォルト）</b><br>全segの中でbeatが最大値になる最初のsegを終点とする。形状が複雑な折り返しスライドに適しています。</span>
-        </label>
-        <label class="mode-option">
-            <input type="radio" name="trunkMode" value="straightLine">
-            <span><b>直線優先モード</b><br>x=0のsegの中で最大beatを持つsegを終点とする。直線で埋め尽くすタイプの譜面で幹の判定がズレない場合に使用します。</span>
-        </label>
     </div>
 
     <div id="rangesContainer">
@@ -252,8 +233,6 @@ function processMC() {
     msgDiv.style.color = "#333";
     dlLink.style.display = "none";
 
-    const trunkMode = document.querySelector('input[name="trunkMode"]:checked').value;
-
     if (!fileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
         return msgDiv.innerHTML = "ファイルを選択してください。";
@@ -329,49 +308,22 @@ function processMC() {
                 const mainAbsPoint = beatToPoint(mainBeat);
 
                 // 幹の補間用の座標配列を作成
-                // 「1回目の終点」= 全segの中でbeatが最大値になる最初のseg（折り返し点）
-                // そこまでを幹（effectiveMainSegs）、それ以降をwrapBackSegsとして扱う
+                // 逆行検出による幹seg抽出:
+                // seg.beatは始点からの相対値。前のsegより逆行したら非幹（枝の一筆書き部分）としてスキップ。
+                // 再び前進（currentMaxPoint以上）に戻ったら幹segとして再採用する。
                 let mainOriginalSegs = mainSlide.seg || [];
                 let effectiveMainSegs = [];
                 {
-                    let maxPoint = mainAbsPoint;
-                    let peakIdx = -1;
-
-                    if (trunkMode === 'straightLine') {
-                        // 直線優先モード: x=0のsegの中で最大beatを持つsegを終点とする
-                        for (let i = 0; i < mainOriginalSegs.length; i++) {
-                            let s = mainOriginalSegs[i];
-                            let p = beatToPoint(s.beat);
-                            if (s.x === 0 && p > maxPoint + 1e-10) {
-                                maxPoint = p;
-                                peakIdx = i;
-                            }
+                    let currentMaxPoint = 0; // 相対beat=0 が始点
+                    for (let i = 0; i < mainOriginalSegs.length; i++) {
+                        let p = beatToPoint(mainOriginalSegs[i].beat);
+                        if (p >= currentMaxPoint - 1e-10) {
+                            // 前進中 → 幹segとして採用
+                            effectiveMainSegs.push(mainOriginalSegs[i]);
+                            currentMaxPoint = p;
                         }
-                        // x=0のsegが見つからない場合は最大beatモードにフォールバック
-                        if (peakIdx === -1) {
-                            for (let i = 0; i < mainOriginalSegs.length; i++) {
-                                let p = beatToPoint(mainOriginalSegs[i].beat);
-                                if (p > maxPoint + 1e-10) {
-                                    maxPoint = p;
-                                    peakIdx = i;
-                                }
-                            }
-                        }
-                    } else {
-                        // 最大beatモード（デフォルト）: 全segの中で最大beatの最初のsegを終点とする
-                        for (let i = 0; i < mainOriginalSegs.length; i++) {
-                            let p = beatToPoint(mainOriginalSegs[i].beat);
-                            if (p > maxPoint + 1e-10) {
-                                maxPoint = p;
-                                peakIdx = i;
-                            }
-                        }
+                        // else: 逆行中 → スキップ（枝分かれの一筆書き部分）
                     }
-
-                    // peakIdx == -1: 全segが始点以下の異常ケース → 全部幹扱い
-                    effectiveMainSegs = (peakIdx === -1)
-                        ? mainOriginalSegs.slice()
-                        : mainOriginalSegs.slice(0, peakIdx + 1);
                 }
 
                 // mainPointsは絶対beat軸で統一（枝の終点も絶対beatで計算するため）
@@ -492,12 +444,8 @@ function processMC() {
                     newSeg.push({ beat: [...mainLastSeg.beat], x: mainLastSeg.x });
                 }
 
-                // ★ 折り返し装飾の復元: 元の幹スライドが折り返しスライドだった場合、
-                //   逆行開始以降のsegを蓋の後にそのまま追記する
-                let wrapBackSegs = mainOriginalSegs.slice(effectiveMainSegs.length);
-                for (let s of wrapBackSegs) {
-                    newSeg.push({ beat: [...s.beat], x: s.x });
-                }
+                // 逆行検出方式により、幹以外のseg（枝の一筆書き部分・旧来の折り返し部分）は
+                // effectiveMainSegsから除外済みのため、wrapBackSegsの追記は不要
 
                 // 重複バグ修復パトロール
                 let fixCount = fixDuplicateSegs(newSeg);
