@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>スライド結合ツール(segmismatch)</title>
+    <title>スライド結合ツール</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
         .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
@@ -304,30 +304,22 @@ function processMC() {
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
-                // mainAbsPointを先に宣言（effectiveMainSegs構築で使用するため）
-                const mainAbsPoint = beatToPoint(mainBeat);
-
                 // 幹の補間用の座標配列を作成
-                // 逆行検出による幹seg抽出:
-                // seg.beatは始点からの相対値。前のsegより逆行したら非幹（枝の一筆書き部分）としてスキップ。
-                // 再び前進（currentMaxPoint以上）に戻ったら幹segとして再採用する。
-                let mainOriginalSegs = mainSlide.seg || [];
-                let effectiveMainSegs = [];
+                // ★ 折り返しスライド対応: 最初にsegのbeat順が逆行した時点で切り詰め、
+                //   それより前の部分のみを有効な幹（effectiveMainSegs）として扱う
+                let mainOriginalSegs = mainSlide.seg ||[];
+                let effectiveMainSegs =[];
                 {
-                    let currentMaxPoint = 0; // 相対beat=0 が始点
+                    let prevSegPoint = 0;
                     for (let i = 0; i < mainOriginalSegs.length; i++) {
                         let p = beatToPoint(mainOriginalSegs[i].beat);
-                        if (p >= currentMaxPoint - 1e-10) {
-                            // 前進中 → 幹segとして採用
-                            effectiveMainSegs.push(mainOriginalSegs[i]);
-                            currentMaxPoint = p;
-                        }
-                        // else: 逆行中 → スキップ（枝分かれの一筆書き部分）
+                        if (p < prevSegPoint - 1e-10) break; // 逆行検知：ここで切り詰め
+                        effectiveMainSegs.push(mainOriginalSegs[i]);
+                        prevSegPoint = p;
                     }
                 }
 
-                // mainPointsは絶対beat軸で統一（枝の終点も絶対beatで計算するため）
-                let mainPoints = [{ point: mainAbsPoint, relX: 0 }];
+                let mainPoints =[ { point: 0, relX: 0 } ];
                 for (let s of effectiveMainSegs) {
                     mainPoints.push({ point: beatToPoint(s.beat), relX: s.x });
                 }
@@ -364,18 +356,15 @@ function processMC() {
                         const offsetX = branchX - mainX;
                         const offsetBeat = beatDiff(branch.beat, mainBeat);
 
-                        // 枝の終点beatを絶対beatで計算（mainPointsも絶対beat軸のため統一）
                         let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
-                        let endAbsBeat = beatAdd(branch.beat, lastSegBeat);
-                        let endAbsPoint = beatToPoint(endAbsBeat);
-                        // segに書き込む相対beat（幹始点からの相対）も算出しておく
                         let endRelBeat = beatAdd(offsetBeat, lastSegBeat);
+                        let endRelPoint = beatToPoint(endRelBeat);
 
-                        let trunkRelX = Math.floor(getRelXAt(mainPoints, endAbsPoint));
+                        let trunkRelX = Math.floor(getRelXAt(mainPoints, endRelPoint));
 
                         events.push({
                             type: 'branch_insert',
-                            point: endAbsPoint,
+                            point: endRelPoint,
                             beat: endRelBeat,
                             x: trunkRelX,
                             branchSegs: branchSegs,
@@ -395,7 +384,7 @@ function processMC() {
                 });
 
                 const newSeg =[];
-                let currentAbsPoint = mainAbsPoint; // 絶対beat軸で初期化
+                let currentAbsPoint = 0;
                 
                 // 一筆書きの生成
                 for (let ev of events) {
@@ -444,8 +433,12 @@ function processMC() {
                     newSeg.push({ beat: [...mainLastSeg.beat], x: mainLastSeg.x });
                 }
 
-                // 逆行検出方式により、幹以外のseg（枝の一筆書き部分・旧来の折り返し部分）は
-                // effectiveMainSegsから除外済みのため、wrapBackSegsの追記は不要
+                // ★ 折り返し装飾の復元: 元の幹スライドが折り返しスライドだった場合、
+                //   逆行開始以降のsegを蓋の後にそのまま追記する
+                let wrapBackSegs = mainOriginalSegs.slice(effectiveMainSegs.length);
+                for (let s of wrapBackSegs) {
+                    newSeg.push({ beat: [...s.beat], x: s.x });
+                }
 
                 // 重複バグ修復パトロール
                 let fixCount = fixDuplicateSegs(newSeg);
