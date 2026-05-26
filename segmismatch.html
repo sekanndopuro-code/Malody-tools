@@ -28,6 +28,11 @@
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
+
+        /* 追加：チェックボックス用のスタイル */
+        .setting-group { background: #f8f9fa; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 20px; display: flex; align-items: center; }
+        .setting-group input[type="checkbox"] { width: 18px; height: 18px; margin-right: 10px; cursor: pointer; }
+        .setting-group label { margin-bottom: 0; cursor: pointer; font-size: 0.9em; color: #444; user-select: none; }
     </style>
 </head>
 <body>
@@ -61,6 +66,12 @@
     </div>
 
     <button type="button" class="btn-add" onclick="addRange()">➕ 選択範囲を追加する</button>
+    
+    <div class="setting-group">
+        <input type="checkbox" id="enableFixDuplicate" checked>
+        <label for="enableFixDuplicate">⚙️ 近似化処理 (重複パトロール) を有効にする</label>
+    </div>
+
     <button type="button" class="btn-process" onclick="processMC()">🚀 結合を実行</button>
 
     <div id="resultMsg"></div>
@@ -69,7 +80,6 @@
 
 <script>
 let rangeIdCounter = 1;
-
 function addRange() {
     const container = document.getElementById("rangesContainer");
     const id = "range-" + rangeIdCounter++;
@@ -127,8 +137,8 @@ function parseBeat(str) {
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function beatDiff(beat1, beat2) {
-    if (!beat1) return[0, 0, 0];
-    if (!beat2) return[...beat1];
+    if (!beat1) return [0, 0, 0];
+    if (!beat2) return [...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
     const num1 = (m1 * d1 + n1) * d2;
@@ -138,13 +148,13 @@ function beatDiff(beat1, beat2) {
     if (diffNum < 0) diffNum = 0; 
     const m = Math.floor(diffNum / den);
     const n = diffNum % den;
-    if (n === 0) return[m, 0, 0];
+    if (n === 0) return [m, 0, 0];
     const g = gcd(n, den);
-    return[m, n / g, den / g];
+    return [m, n / g, den / g];
 }
 
 function beatAdd(beat1, beat2) {
-    if (!beat1) return[...beat2];
+    if (!beat1) return [...beat2];
     if (!beat2) return [...beat1];
     const m1 = beat1[0], n1 = beat1[1] || 0, d1 = beat1[2] === 0 ? 1 : (beat1[2] || 1);
     const m2 = beat2[0], n2 = beat2[1] || 0, d2 = beat2[2] === 0 ? 1 : (beat2[2] || 1);
@@ -154,16 +164,15 @@ function beatAdd(beat1, beat2) {
     let num = num1 + num2;
     let m = m1 + m2 + Math.floor(num / den);
     let n = num % den;
-    if (n === 0) return[m, 0, 0];
+    if (n === 0) return [m, 0, 0];
     const g = gcd(n, den);
-    return[m, n / g, den / g];
+    return [m, n / g, den / g];
 }
 
 function getRelXAt(mainPoints, targetPoint) {
     if (mainPoints.length === 1) return mainPoints[0].relX;
     if (targetPoint <= mainPoints[0].point) return mainPoints[0].relX;
     if (targetPoint >= mainPoints[mainPoints.length - 1].point) return mainPoints[mainPoints.length - 1].relX;
-    
     for (let i = 0; i < mainPoints.length - 1; i++) {
         let p1 = mainPoints[i];
         let p2 = mainPoints[i+1];
@@ -178,10 +187,9 @@ function getRelXAt(mainPoints, targetPoint) {
 
 // 重複バグ修復パトロール (1万分の1ずらし)
 function fixDuplicateSegs(segArray) {
-    let usedPoints =[];
+    let usedPoints = [];
     let fixedCount = 0;
-    const MICRO_DEN = 10000; 
-    
+    const MICRO_DEN = 10000;
     function addMicroOffset(beat, offsetCount) {
         if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
         const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : beat[2];
@@ -190,9 +198,9 @@ function fixDuplicateSegs(segArray) {
         let extraM = Math.floor(newNum / newDen);
         let newM = m + extraM;
         newNum = newNum % newDen;
-        if (newNum === 0) return[newM, 0, 0];
+        if (newNum === 0) return [newM, 0, 0];
         let g = gcd(newNum, newDen);
-        return[newM, newNum / g, newDen / g];
+        return [newM, newNum / g, newDen / g];
     }
 
     for (let i = segArray.length - 1; i >= 0; i--) {
@@ -201,7 +209,6 @@ function fixDuplicateSegs(segArray) {
         
         let conflictCount = 0;
         let currentP = p;
-        
         while (true) {
             let isConflict = false;
             for (let j = 0; j < usedPoints.length; j++) {
@@ -228,7 +235,9 @@ function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
-    
+    // 追加：チェックボックスのON/OFFを取得
+    const enableFixDuplicate = document.getElementById("enableFixDuplicate").checked;
+
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
     dlLink.style.display = "none";
@@ -239,14 +248,12 @@ function processMC() {
     }
 
     const rangeGroups = document.querySelectorAll('.range-group');
-    const ranges =[];
-    
+    const ranges = [];
     for (let i = 0; i < rangeGroups.length; i++) {
         const startStr = rangeGroups[i].querySelector('.startBeat').value;
         const endStr = rangeGroups[i].querySelector('.endBeat').value;
         const startBeat = parseBeat(startStr);
         const endBeat = parseBeat(endStr);
-        
         if (!startBeat || !endBeat) {
             msgDiv.style.color = "#d32f2f";
             return msgDiv.innerHTML = `⚠️ 範囲 ${i + 1} のBeatフォーマットが正しくありません。`;
@@ -263,7 +270,6 @@ function processMC() {
 
     const file = fileInput.files[0];
     const reader = new FileReader();
-    
     reader.onload = function(e) {
         try {
             const data = JSON.parse(e.target.result);
@@ -275,11 +281,10 @@ function processMC() {
             const notes = data.note;
             let allDeletedNotes = new Set();
             let totalJoinedCount = 0;
-            let resultLogs =[];
-
+            let resultLogs = [];
             for (let r = 0; r < ranges.length; r++) {
                 const range = ranges[r];
-                const targetSlides =[];
+                const targetSlides = [];
 
                 for (let i = 0; i < notes.length; i++) {
                     const note = notes[i];
@@ -298,36 +303,31 @@ function processMC() {
                     continue;
                 }
 
-                // 「メイン幹」は必ず始点が一番早いもの
                 targetSlides.sort((a, b) => beatToPoint(a.beat) - beatToPoint(b.beat));
                 const mainSlide = targetSlides[0];
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
-
-                // 幹の補間用の座標配列を作成
-                // ★ 折り返しスライド対応: 最初にsegのbeat順が逆行した時点で切り詰め、
-                //   それより前の部分のみを有効な幹（effectiveMainSegs）として扱う
-                let mainOriginalSegs = mainSlide.seg ||[];
-                let effectiveMainSegs =[];
+                
+                let mainOriginalSegs = mainSlide.seg || [];
+                let effectiveMainSegs = [];
                 {
                     let prevSegPoint = 0;
                     for (let i = 0; i < mainOriginalSegs.length; i++) {
                         let p = beatToPoint(mainOriginalSegs[i].beat);
-                        if (p < prevSegPoint - 1e-10) break; // 逆行検知：ここで切り詰め
+                        if (p < prevSegPoint - 1e-10) break;
                         effectiveMainSegs.push(mainOriginalSegs[i]);
                         prevSegPoint = p;
                     }
                 }
 
-                let mainPoints =[ { point: 0, relX: 0 } ];
+                let mainPoints = [ { point: 0, relX: 0 } ];
                 for (let s of effectiveMainSegs) {
                     mainPoints.push({ point: beatToPoint(s.beat), relX: s.x });
                 }
 
                 let branches = targetSlides.slice(1);
-                let events =[];
+                let events = [];
                 
-                // メイン幹の「最後のseg」を判定の蓋として取り除いておく
                 let mainLastSeg = null;
                 let mainLastPoint = 0;
                 
@@ -335,7 +335,6 @@ function processMC() {
                     mainLastSeg = effectiveMainSegs[effectiveMainSegs.length - 1];
                     mainLastPoint = beatToPoint(mainLastSeg.beat);
                     
-                    // 最後以外の途中segを、一筆書きのイベントとして登録
                     for (let i = 0; i < effectiveMainSegs.length - 1; i++) {
                         let s = effectiveMainSegs[i];
                         events.push({
@@ -347,11 +346,10 @@ function processMC() {
                     }
                 }
 
-                // 枝の分岐点(終点タイミング)をイベントに登録
                 if (branches.length > 0) {
                     for (let i = 0; i < branches.length; i++) {
                         const branch = branches[i];
-                        const branchSegs = branch.seg ||[];
+                        const branchSegs = branch.seg || [];
                         const branchX = (typeof branch.x === 'number') ? branch.x : 0;
                         const offsetX = branchX - mainX;
                         const offsetBeat = beatDiff(branch.beat, mainBeat);
@@ -361,7 +359,6 @@ function processMC() {
                         let endRelPoint = beatToPoint(endRelBeat);
 
                         let trunkRelX = Math.floor(getRelXAt(mainPoints, endRelPoint));
-
                         events.push({
                             type: 'branch_insert',
                             point: endRelPoint,
@@ -374,7 +371,6 @@ function processMC() {
                     }
                 }
 
-                // イベントを時間順にソート (同じ時間なら幹のsegを優先)
                 events.sort((a, b) => {
                     let diff = a.point - b.point;
                     if (Math.abs(diff) > 1e-10) return diff;
@@ -382,41 +378,31 @@ function processMC() {
                     if (a.type === 'branch_insert' && b.type === 'main_seg') return 1;
                     return 0;
                 });
-
-                const newSeg =[];
+                const newSeg = [];
                 let currentAbsPoint = 0;
                 
-                // 一筆書きの生成
                 for (let ev of events) {
                     if (ev.type === 'main_seg') {
-                        newSeg.push({ beat:[...ev.beat], x: ev.x });
+                        newSeg.push({ beat: [...ev.beat], x: ev.x });
                         currentAbsPoint = ev.point;
                     } else {
-                        // 分岐点(幹の現在座標)
-                        newSeg.push({ beat:[...ev.beat], x: ev.x }); 
-
-                        // 復路
+                        newSeg.push({ beat: [...ev.beat], x: ev.x });
                         for (let j = ev.branchSegs.length - 1; j >= 0; j--) {
                             let s = ev.branchSegs[j];
                             newSeg.push({ beat: beatAdd(ev.offsetBeat, s.beat), x: ev.offsetX + s.x });
                         }
                         
-                        // 始点
-                        newSeg.push({ beat:[...ev.offsetBeat], x: ev.offsetX });
-
-                        // 往路
+                        newSeg.push({ beat: [...ev.offsetBeat], x: ev.offsetX });
                         for (let j = 0; j < ev.branchSegs.length; j++) {
                             let s = ev.branchSegs[j];
                             newSeg.push({ beat: beatAdd(ev.offsetBeat, s.beat), x: ev.offsetX + s.x });
                         }
 
-                        // 帰還点(幹の現在座標)
-                        newSeg.push({ beat:[...ev.beat], x: ev.x }); 
+                        newSeg.push({ beat: [...ev.beat], x: ev.x });
                         currentAbsPoint = ev.point;
                     }
                 }
 
-                // ★ NEW：現在地が幹の終点より未来にある場合、幹の軌道を逆行して戻る
                 if (mainLastSeg && currentAbsPoint > mainLastPoint) {
                     for (let i = events.length - 1; i >= 0; i--) {
                         let ev = events[i];
@@ -428,20 +414,20 @@ function processMC() {
                     }
                 }
 
-                // 最後に「幹の終点(蓋)」を配置する
                 if (mainLastSeg) {
                     newSeg.push({ beat: [...mainLastSeg.beat], x: mainLastSeg.x });
                 }
 
-                // ★ 折り返し装飾の復元: 元の幹スライドが折り返しスライドだった場合、
-                //   逆行開始以降のsegを蓋の後にそのまま追記する
                 let wrapBackSegs = mainOriginalSegs.slice(effectiveMainSegs.length);
                 for (let s of wrapBackSegs) {
                     newSeg.push({ beat: [...s.beat], x: s.x });
                 }
 
-                // 重複バグ修復パトロール
-                let fixCount = fixDuplicateSegs(newSeg);
+                // 修正：チェックボックスがONのときだけ重複修復を実行する
+                let fixCount = 0;
+                if (enableFixDuplicate) {
+                    fixCount = fixDuplicateSegs(newSeg);
+                }
                 mainSlide.seg = newSeg;
                 
                 for (let i = 0; i < branches.length; i++) {
@@ -450,12 +436,18 @@ function processMC() {
                 
                 totalJoinedCount += targetSlides.length;
                 
-                if (targetSlides.length === 1) {
-                    let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : " (重複なし)";
-                    resultLogs.push(`<span style="color:#17a2b8;">ℹ️ 範囲 ${range.index}: 1個のみ検知されたため、バグ修復のみ実行しました${fixMsg}</span>`);
+                // ログ表示の出し分け
+                let fixMsg = "";
+                if (enableFixDuplicate) {
+                    fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : " (重複なし)";
                 } else {
-                    let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : "";
-                    resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${fixMsg}</span>`);
+                    fixMsg = " (重複パトロールOFF)";
+                }
+
+                if (targetSlides.length === 1) {
+                    resultLogs.push(`<span style="color:#17a2b8;">ℹ️ 範囲 ${range.index}: 1個のみ検知されたため、バグ修復処理のみ判定しました${fixMsg}</span>`);
+                } else {
+                    resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を結合しました${enableFixDuplicate && fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : fixMsg}</span>`);
                 }
             }
 
@@ -465,7 +457,6 @@ function processMC() {
             }
 
             data.note = notes.filter(n => !allDeletedNotes.has(n));
-
             const outJson = JSON.stringify(data); 
             const blob = new Blob([outJson], { type: "application/octet-stream" });
             const url = URL.createObjectURL(blob);
@@ -477,7 +468,6 @@ function processMC() {
             dlLink.download = originalName + "_joined.mc";
             
             dlLink.style.display = "block";
-            
             msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
 
         } catch (err) {
