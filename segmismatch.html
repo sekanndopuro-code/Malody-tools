@@ -304,22 +304,32 @@ function processMC() {
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
 
+                // mainAbsPointを先に宣言（effectiveMainSegs構築で使用するため）
+                const mainAbsPoint = beatToPoint(mainBeat);
+
                 // 幹の補間用の座標配列を作成
-                // ★ 折り返しスライド対応: 最初にsegのbeat順が逆行した時点で切り詰め、
-                //   それより前の部分のみを有効な幹（effectiveMainSegs）として扱う
-                let mainOriginalSegs = mainSlide.seg ||[];
-                let effectiveMainSegs =[];
+                // 「1回目の終点」= 全segの中でbeatが最大値になる最初のseg（折り返し点）
+                // そこまでを幹（effectiveMainSegs）、それ以降をwrapBackSegsとして扱う
+                let mainOriginalSegs = mainSlide.seg || [];
+                let effectiveMainSegs = [];
                 {
-                    let prevSegPoint = 0;
+                    let maxPoint = mainAbsPoint;
+                    let peakIdx = -1;
                     for (let i = 0; i < mainOriginalSegs.length; i++) {
                         let p = beatToPoint(mainOriginalSegs[i].beat);
-                        if (p < prevSegPoint - 1e-10) break; // 逆行検知：ここで切り詰め
-                        effectiveMainSegs.push(mainOriginalSegs[i]);
-                        prevSegPoint = p;
+                        if (p > maxPoint + 1e-10) {
+                            maxPoint = p;
+                            peakIdx = i;
+                        }
                     }
+                    // peakIdx == -1: 全segが始点以下の異常ケース → 全部幹扱い
+                    effectiveMainSegs = (peakIdx === -1)
+                        ? mainOriginalSegs.slice()
+                        : mainOriginalSegs.slice(0, peakIdx + 1);
                 }
 
-                let mainPoints =[ { point: 0, relX: 0 } ];
+                // mainPointsは絶対beat軸で統一（枝の終点も絶対beatで計算するため）
+                let mainPoints = [{ point: mainAbsPoint, relX: 0 }];
                 for (let s of effectiveMainSegs) {
                     mainPoints.push({ point: beatToPoint(s.beat), relX: s.x });
                 }
@@ -356,15 +366,18 @@ function processMC() {
                         const offsetX = branchX - mainX;
                         const offsetBeat = beatDiff(branch.beat, mainBeat);
 
+                        // 枝の終点beatを絶対beatで計算（mainPointsも絶対beat軸のため統一）
                         let lastSegBeat = branchSegs.length > 0 ? branchSegs[branchSegs.length - 1].beat : [0,0,0];
+                        let endAbsBeat = beatAdd(branch.beat, lastSegBeat);
+                        let endAbsPoint = beatToPoint(endAbsBeat);
+                        // segに書き込む相対beat（幹始点からの相対）も算出しておく
                         let endRelBeat = beatAdd(offsetBeat, lastSegBeat);
-                        let endRelPoint = beatToPoint(endRelBeat);
 
-                        let trunkRelX = Math.floor(getRelXAt(mainPoints, endRelPoint));
+                        let trunkRelX = Math.floor(getRelXAt(mainPoints, endAbsPoint));
 
                         events.push({
                             type: 'branch_insert',
-                            point: endRelPoint,
+                            point: endAbsPoint,
                             beat: endRelBeat,
                             x: trunkRelX,
                             branchSegs: branchSegs,
@@ -384,7 +397,7 @@ function processMC() {
                 });
 
                 const newSeg =[];
-                let currentAbsPoint = 0;
+                let currentAbsPoint = mainAbsPoint; // 絶対beat軸で初期化
                 
                 // 一筆書きの生成
                 for (let ev of events) {
