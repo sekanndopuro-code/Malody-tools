@@ -61,6 +61,19 @@
         </label>
     </div>
 
+    <!-- 重複パトロール（近似化処理）オンオフ機能 -->
+    <div class="toggle-group" style="border: 2px solid #fd7e14; background: #fff8f0;">
+        <label>
+            <input type="checkbox" id="dedupPatrolToggle" checked>
+            <b>重複パトロール（近似化処理）を有効にする</b><br>
+            <span style="font-size: 0.85em; color: #666; margin-left: 24px; display:block;">
+                segのタイミング重複をずらして回避します。<br>
+                ※OFFにすると重複が残りますが、segタイミングが見た目通りになります。<br>
+                ※エディターの仕様上バグが起きる場合がありますが、見た目優先の場合はOFFを推奨。
+            </span>
+        </label>
+    </div>
+
     <div id="rangesContainer">
         <div class="range-group clearfix" id="range-0">
             <h4>範囲 1</h4>
@@ -338,6 +351,7 @@ function processMC() {
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
     const isAutoEffect = document.getElementById("autoEffectToggle").checked;
+    const isDedupPatrol = document.getElementById("dedupPatrolToggle").checked;
     
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
@@ -484,7 +498,7 @@ function processMC() {
                     newSeg.push(mainSegClone);
                 }
 
-                let fixCount = fixDuplicateSegs(newSeg);
+                let fixCount = isDedupPatrol ? fixDuplicateSegs(newSeg) : (() => { newSeg.forEach(s => { if (s.isMain) delete s.isMain; }); return 0; })();
                 mainSlide.seg = newSeg;
                 
                 for (let i = 0; i < branches.length; i++) {
@@ -492,7 +506,9 @@ function processMC() {
                 }
                 
                 totalJoinedCount += targetSlides.length;
-                let fixMsg = fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "";
+                let fixMsg = isDedupPatrol
+                    ? (fixCount > 0 ? ` (微小ズレ回避 ${fixCount}箇所✨)` : "")
+                    : ` <span style="color:#fd7e14;">(重複パトロールOFF)</span>`;
                 resultLogs.push(`<span style="color:#28a745;">✅ 範囲 ${range.index}: ${targetSlides.length}個を 1/200 縮合結合しました${fixMsg}</span>`);
 
                 // ==========================================
