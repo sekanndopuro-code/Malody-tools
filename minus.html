@@ -20,7 +20,7 @@
         .flex-container { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
         .box-minus { flex: 1; min-width: 200px; padding: 10px; background: #e9ecef; border-radius: 6px; border: 1px solid #ced4da; }
         .box-plus { flex: 1; min-width: 200px; padding: 10px; background: #d4edda; border-radius: 6px; border: 1px solid #c3e6cb; }
-
+ 
         button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; }
         .btn-add { background: #17a2b8; margin-bottom: 20px; }
         .btn-add:hover { background: #138496; }
@@ -33,10 +33,13 @@
         #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
         #dlLink:hover { background: #0056b3; }
         #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
+        .toggle-group { background: #e9ecef; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 0.9em; }
+        .toggle-group label { display: inline-flex; align-items: flex-start; font-weight: normal; cursor: pointer; margin-bottom: 0; }
+        .toggle-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-top: 3px; transform: scale(1.2); flex-shrink: 0; }
     </style>
 </head>
 <body>
-
+ 
 <div class="container">
     <h1>⏪ マイナス結合ツール</h1>
     <p class="desc">
@@ -47,7 +50,22 @@
         <label>📁 .mcファイルを選択</label>
         <input type="file" id="mcFile" accept="*/*">
     </div>
-
+ 
+    <!-- 重複パトロール（近似化処理）オンオフ機能 -->
+    <div class="toggle-group" style="border: 2px solid #fd7e14; background: #fff8f0;">
+        <label>
+            <input type="checkbox" id="dedupPatrolToggle" checked>
+            <span>
+                <b>重複パトロール（近似化処理）を有効にする</b><br>
+                <span style="font-size: 0.85em; color: #666; display:block;">
+                    segのタイミング重複をずらして回避します。<br>
+                    ※OFFにすると重複が残りますが、segタイミングが正確になります。<br>
+                    ※バグスライドができますが、見た目優先の場合はOFFを推奨。
+                </span>
+            </span>
+        </label>
+    </div>
+ 
     <div id="pairsContainer">
         <div class="range-pair clearfix" id="pair-0">
             <h4>結合セット 1</h4>
@@ -67,17 +85,17 @@
             <button type="button" class="btn-remove" onclick="removePair('pair-0')">🗑️ 削除</button>
         </div>
     </div>
-
+ 
     <button type="button" class="btn-add" onclick="addPair()">➕ 結合セットを追加する</button>
     <button type="button" class="btn-process" onclick="processMC()">⏪ マイナス結合を実行</button>
-
+ 
     <div id="resultMsg"></div>
     <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
 </div>
-
+ 
 <script>
 let pairIdCounter = 1;
-
+ 
 function addPair() {
     const container = document.getElementById("pairsContainer");
     const id = "pair-" + pairIdCounter++;
@@ -103,7 +121,7 @@ function addPair() {
     container.insertAdjacentHTML('beforeend', html);
     updatePairLabels();
 }
-
+ 
 function removePair(id) {
     const container = document.getElementById("pairsContainer");
     if (container.children.length <= 1) {
@@ -113,21 +131,21 @@ function removePair(id) {
     document.getElementById(id).remove();
     updatePairLabels();
 }
-
+ 
 function updatePairLabels() {
     const groups = document.querySelectorAll('.range-pair h4');
     groups.forEach((el, index) => {
         el.innerText = `結合セット ${index + 1}`;
     });
 }
-
+ 
 function beatToPoint(beat) {
     if (!beat || beat.length !== 3) return 0;
     if (beat[2] === 0) return beat[0];
     // 負の小節もそのまま足し算で処理
     return beat[0] + (beat[1] / beat[2]);
 }
-
+ 
 function parseBeat(str) {
     if (!str) return null;
     str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
@@ -137,9 +155,9 @@ function parseBeat(str) {
     }
     return null;
 }
-
+ 
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
-
+ 
 function beatAdd(beat1, beat2) {
     if (!beat1) return [...beat2];
     if (!beat2) return[...beat1];
@@ -155,7 +173,7 @@ function beatAdd(beat1, beat2) {
     const g = gcd(n, den);
     return[m, n / g, den / g];
 }
-
+ 
 // 負の相対時間を算出する関数 (targetBeat - baseBeat)
 // 小節のみマイナス、分子分母は必ず正になるように正規化する
 function beatDiffSigned(targetBeat, baseBeat) {
@@ -174,7 +192,7 @@ function beatDiffSigned(targetBeat, baseBeat) {
     const g = gcd(n, den);
     return [m, n / g, den / g];
 }
-
+ 
 // 負のBeatにも対応した、重複バグ修復パトロール (1万分の1ずらし)
 function fixDuplicateSegs(segArray) {
     let usedPoints =[];
@@ -192,7 +210,7 @@ function fixDuplicateSegs(segArray) {
         const g = gcd(newN, den);
         return[newM, newN / g, den / g];
     }
-
+ 
     // メインの終点（判定位置）を守るため後ろから走査
     for (let i = segArray.length - 1; i >= 0; i--) {
         let segItem = segArray[i];
@@ -222,21 +240,22 @@ function fixDuplicateSegs(segArray) {
     }
     return fixedCount;
 }
-
+ 
 function processMC() {
     const fileInput = document.getElementById("mcFile");
     const msgDiv = document.getElementById("resultMsg");
     const dlLink = document.getElementById("dlLink");
+    const isDedupPatrol = document.getElementById("dedupPatrolToggle").checked;
     
     msgDiv.innerHTML = "";
     msgDiv.style.color = "#333";
     dlLink.style.display = "none";
-
+ 
     if (!fileInput.files.length) {
         msgDiv.style.color = "#d32f2f";
         return msgDiv.innerHTML = "ファイルを選択してください。";
     }
-
+ 
     const pairGroups = document.querySelectorAll('.range-pair');
     const pairs =[];
     
@@ -269,7 +288,7 @@ function processMC() {
             pMax: Math.max(pStartPoint, pEndPoint)
         });
     }
-
+ 
     const file = fileInput.files[0];
     const reader = new FileReader();
     
@@ -280,22 +299,22 @@ function processMC() {
                 msgDiv.style.color = "#d32f2f";
                 return msgDiv.innerHTML = "無効な譜面データです。";
             }
-
+ 
             const notes = data.note;
             let allDeletedNotes = new Set();
             let totalJoinedCount = 0;
             let resultLogs =[];
-
+ 
             for (let r = 0; r < pairs.length; r++) {
                 const pair = pairs[r];
                 const minusSlides =[];
                 const plusSlides =[];
-
+ 
                 // スライドをマイナス枠とプラス枠に振り分け
                 for (let i = 0; i < notes.length; i++) {
                     const note = notes[i];
                     if (allDeletedNotes.has(note)) continue;
-
+ 
                     if (note.seg && Array.isArray(note.seg)) {
                         const point = beatToPoint(note.beat);
                         if (point >= pair.mMin - 0.001 && point <= pair.mMax + 0.001) {
@@ -305,7 +324,7 @@ function processMC() {
                         }
                     }
                 }
-
+ 
                 // エラーチェック（プラス枠が複数、またはマイナス枠が0個）
                 if (plusSlides.length !== 1) {
                     resultLogs.push(`<span style="color:#d32f2f;">⚠️ 結合セット ${pair.index}: プラス枠のスライドが「${plusSlides.length}個」あります。1つに修正してください。</span>`);
@@ -315,17 +334,17 @@ function processMC() {
                     resultLogs.push(`<span style="color:#d32f2f;">⚠️ 結合セット ${pair.index}: マイナス枠の装飾スライドが見つかりません。</span>`);
                     continue;
                 }
-
+ 
                 // プラス枠のスライドを「メイン基準(0)」とする
                 const mainSlide = plusSlides[0];
                 const mainBeat = mainSlide.beat;
                 const mainX = (typeof mainSlide.x === 'number') ? mainSlide.x : 0;
-
+ 
                 // マイナス枠のスライドを、メインに近い時間(遅い順)にソートして処理
                 minusSlides.sort((a, b) => beatToPoint(b.beat) - beatToPoint(a.beat));
-
+ 
                 const newSeg =[];
-
+ 
                 // マイナス装飾スライド群の「逆行→順走→戻る」処理
                 for (let i = 0; i < minusSlides.length; i++) {
                     const branch = minusSlides[i];
@@ -336,7 +355,7 @@ function processMC() {
                     for (let s of branchSegs) {
                         absPoints.push({ beat: beatAdd(branch.beat, s.beat), x: branchX + s.x });
                     }
-
+ 
                     // 【復路(逆行)】 基準点から、装飾の終点→始点へ遡る
                     for (let j = absPoints.length - 1; j >= 0; j--) {
                         let p = absPoints[j];
@@ -345,7 +364,7 @@ function processMC() {
                             x: p.x - mainX
                         });
                     }
-
+ 
                     // 【往路(順行)】 装飾の始点から終点へ
                     for (let j = 1; j < absPoints.length; j++) {
                         let p = absPoints[j];
@@ -354,20 +373,20 @@ function processMC() {
                             x: p.x - mainX
                         });
                     }
-
+ 
                     // 【帰還点】 基準点(0, 0)へ戻る
                     newSeg.push({ beat: [0,0,0], x: 0 });
                 }
-
+ 
                 // 最後にメイン幹の元々のseg(未来への進行)を追加
                 if (mainSlide.seg) {
                     for (let s of mainSlide.seg) {
                         newSeg.push(JSON.parse(JSON.stringify(s)));
                     }
                 }
-
+ 
                 // 重複バグ修復パトロール
-                let fixCount = fixDuplicateSegs(newSeg);
+                let fixCount = isDedupPatrol ? fixDuplicateSegs(newSeg) : 0;
                 mainSlide.seg = newSeg;
                 
                 for (let i = 0; i < minusSlides.length; i++) {
@@ -375,17 +394,19 @@ function processMC() {
                 }
                 
                 totalJoinedCount += (1 + minusSlides.length);
-                let fixMsg = fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : "";
+                let fixMsg = isDedupPatrol
+                    ? (fixCount > 0 ? ` (重複バグ ${fixCount}箇所を自動修復✨)` : "")
+                    : ` <span style="color:#fd7e14;">(重複パトロールOFF)</span>`;
                 resultLogs.push(`<span style="color:#28a745;">✅ 結合セット ${pair.index}: メイン1個 ＋ マイナス装飾${minusSlides.length}個を結合しました${fixMsg}</span>`);
             }
-
+ 
             if (totalJoinedCount === 0) {
                 msgDiv.style.color = "#d32f2f";
                 return msgDiv.innerHTML = "処理に成功した結合セットがありませんでした。";
             }
-
+ 
             data.note = notes.filter(n => !allDeletedNotes.has(n));
-
+ 
             const outJson = JSON.stringify(data); 
             const blob = new Blob([outJson], { type: "application/octet-stream" });
             const url = URL.createObjectURL(blob);
@@ -399,7 +420,7 @@ function processMC() {
             dlLink.style.display = "block";
             
             msgDiv.innerHTML = `<b>【処理結果】合計 ${totalJoinedCount}個 のスライドを処理しました！</b><br><br>` + resultLogs.join("<br>");
-
+ 
         } catch (err) {
             console.error(err);
             msgDiv.style.color = "#d32f2f";
