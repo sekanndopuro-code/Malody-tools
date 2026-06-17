@@ -14,7 +14,7 @@ https://sekanndopuro-code.github.io/Malody-tools/segmismatch
 https://sekanndopuro-code.github.io/Malody-tools/scroll
 
 
-[bpm変化があってもscrollが一定になるやつ]
+[bpm変化があっても見た目scrollが一定になるやつ]
 
 https://sekanndopuro-code.github.io/Malody-tools/bpm2scroll
 
