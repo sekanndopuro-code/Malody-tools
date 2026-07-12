@@ -56,8 +56,8 @@
 
     <div id="exportSection">
         <div class="radio-group" style="background:#fff8e1; border-color:#ffe082;">
-            <label><input type="radio" name="extractMode" value="slide" checked> <b>🔵 スライドのみ抽出</b><br><span class="note">seg持ち かつ type:3 以外のノーツ</span></label>
-            <label><input type="radio" name="extractMode" value="nonslide"> <b>🟢 スライド以外を抽出</b><br><span class="note">segを持たないノーツ、またはtype:3のノーツ</span></label>
+            <label><input type="radio" name="extractMode" value="slide" checked> <b>🔵 スライドのみ抽出</b><br><span class="note">seg持ちのノーツ</span></label>
+            <label><input type="radio" name="extractMode" value="nonslide"> <b>🟢 スライド以外を抽出</b><br><span class="note">segを持たないノーツ（type:4のwipeノーツなど）</span></label>
         </div>
         <div id="rangesContainer">
             <div class="range-group" id="range-0">
@@ -148,8 +148,8 @@ function removeRestoreFile(index) {
     updateFileList();
 }
 
-// スライドノーツの判定：segを持ち、かつtype:3ではないもの
-function isSlideNote(n) { return !!(n.seg && n.type !== 3); }
+// スライドノーツの判定：segを持つノーツ（type:4には元々segが付かない）
+function isSlideNote(n) { return !!n.seg; }
 
 function safeBeat(beat) { return (!beat || !Array.isArray(beat) || beat.length < 3) ? [0,0,1] : [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]]; }
 function beatToPoint(beat) { let b = safeBeat(beat); return b[0] + (b[1] / b[2]); }
