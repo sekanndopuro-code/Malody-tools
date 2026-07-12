@@ -55,6 +55,10 @@
     </div>
 
     <div id="exportSection">
+        <div class="radio-group" style="background:#fff8e1; border-color:#ffe082;">
+            <label><input type="radio" name="extractMode" value="slide" checked> <b>🔵 スライドのみ抽出</b><br><span class="note">seg持ち かつ type:3 以外のノーツ</span></label>
+            <label><input type="radio" name="extractMode" value="nonslide"> <b>🟢 スライド以外を抽出</b><br><span class="note">segを持たないノーツ、またはtype:3のノーツ</span></label>
+        </div>
         <div id="rangesContainer">
             <div class="range-group" id="range-0">
                 <h4>範囲 1</h4>
@@ -144,6 +148,9 @@ function removeRestoreFile(index) {
     updateFileList();
 }
 
+// スライドノーツの判定：segを持ち、かつtype:3ではないもの
+function isSlideNote(n) { return !!(n.seg && n.type !== 3); }
+
 function safeBeat(beat) { return (!beat || !Array.isArray(beat) || beat.length < 3) ? [0,0,1] : [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]]; }
 function beatToPoint(beat) { let b = safeBeat(beat); return b[0] + (b[1] / b[2]); }
 function parseBeat(str) {
@@ -175,13 +182,17 @@ function exportData() {
 
     if (ranges.includes(null)) return alert("Beatの入力形式が正しくありません (例: 10,0,1)");
 
+    const extractMode = document.querySelector('input[name="extractMode"]:checked').value; // 'slide' or 'nonslide'
+    const label = extractMode === "slide" ? "スライド" : "スライド以外のノーツ";
+
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
             const data = JSON.parse(e.target.result.replace(/^\uFEFF/, '').trim());
             const extracted = [];
             const remaining = data.note.filter(n => {
-                if (n.seg) {
+                const isTarget = extractMode === "slide" ? isSlideNote(n) : !isSlideNote(n);
+                if (isTarget) {
                     const p = beatToPoint(n.beat);
                     if (ranges.some(r => p >= r.min - 0.001 && p <= r.max + 0.001)) {
                         extracted.push(n);
@@ -191,7 +202,7 @@ function exportData() {
                 return true;
             });
 
-            if (extracted.length === 0) return alert("指定範囲にスライドが見つかりませんでした。");
+            if (extracted.length === 0) return alert(`指定範囲に${label}が見つかりませんでした。`);
 
             const outTxt = JSON.stringify(extracted);
             document.getElementById("exportText").value = outTxt;
@@ -205,7 +216,7 @@ function exportData() {
             setupDL("dlExportMcLink", JSON.stringify(data), name + "_light.mc", "application/octet-stream");
 
             msgDiv.style.color = "#28a745";
-            msgDiv.innerHTML = `✅ ${extracted.length} 個のスライドを保管しました！`;
+            msgDiv.innerHTML = `✅ ${extracted.length} 個の${label}を保管しました！`;
         } catch(err) { alert("解析失敗: " + err); }
     };
     reader.readAsText(mcFileInput.files[0]);
@@ -252,7 +263,7 @@ async function restoreData() {
         let restoredCount = 0;
         for (let sn of allNotes) {
             const sp = beatToPoint(sn.beat);
-            data.note = data.note.filter(n => !(n.seg && Math.abs(beatToPoint(n.beat) - sp) < 1e-4 && n.x === sn.x));
+            data.note = data.note.filter(n => !(Math.abs(beatToPoint(n.beat) - sp) < 1e-4 && n.x === sn.x));
             data.note.push(sn);
             restoredCount++;
         }
@@ -262,7 +273,7 @@ async function restoreData() {
         // 拡張子が txt になるのを防ぐために "application/octet-stream" を指定
         setupDL("dlRestoreLink", JSON.stringify(data), mcFileInput.files[0].name.replace(/\.mc$/i, "") + "_restored.mc", "application/octet-stream");
         msgDiv.style.color = "#e65100";
-        msgDiv.innerHTML = `🛠️ 復元完了！計 ${restoredCount} 個のスライドを挿入しました。`;
+        msgDiv.innerHTML = `🛠️ 復元完了！計 ${restoredCount} 個のノーツを挿入しました。`;
     } catch(err) { 
         console.error(err);
         alert("復元に失敗しました。データの形式を確認してください。"); 
