@@ -57,4 +57,8 @@ https://sekanndopuro-code.github.io/Malody-tools/joinslides
 
 https://sekanndopuro-code.github.io/Malody-tools/adjustshima-1
 
+
+[後述]
+https://sekanndopuro-code.github.io/Malody-tools/wipe2hold
+
 自分用に作ったやつなので色々がばいです。AIが残していったMalodyの仕様を履き違えた文言がたまにあります。
