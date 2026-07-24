@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>倍取りツール (BPM ×N)</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .desc { font-size: 0.85em; color: #555; margin-top: -10px; margin-bottom: 20px; line-height: 1.4; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        input[type="number"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+
+        .radio-group { background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c8e6c9; }
+        .radio-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
+        .radio-group label:last-child { margin-bottom: 0; }
+        .note { font-size: 0.8em; color: #666; margin-top: 3px; display: block; line-height: 1.4; }
+
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
+        .btn-process { background: #009688; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(0, 150, 136, 0.3); }
+        .btn-process:hover { background: #00796b; }
+        
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
+        #dlLink:hover { background: #0056b3; }
+        #resultMsg { margin-top: 15px; font-size: 0.95em; font-weight: bold; line-height: 1.6; }
+        .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
+        .error-log { color: #d32f2f; background: #ffebee; border-color: #f5c6cb; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>⏫ 倍取りツール (BPM ×N)</h1>
+    <p class="desc">
+        譜面データ内にある<b>すべてのBPM設定を一括で指定した倍率</b>にします。
+    </p>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>📁 対象の .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>🔢 倍率</label>
+        <input type="number" id="multiplier" value="2" step="any" min="0.000001">
+    </div>
+
+    <!-- 倍にする対象の設定 -->
+    <div class="radio-group">
+        <label style="font-weight: bold; margin-bottom: 10px; color: #1b5e20;">⚙️ 倍にする対象</label>
+        <label style="color: #666;">
+            <input type="checkbox" checked disabled> <b>BPMの数値</b> ※必須
+        </label>
+        <label>
+            <input type="checkbox" id="doubleTimeBeat" checked> <b>BPM変化のタイミング</b> (timeイベントのbeat)
+            <span class="note" style="margin-left:25px;">実時間とズレないようにBPM変更が起きる位置も同じ倍率で引き伸ばします。</span>
+        </label>
+        <label>
+            <input type="checkbox" id="doubleAllBeat"> <b>ノーツやエフェクトのタイミングも全て</b>
+            <span class="note" style="margin-left:25px;">まだノーツを自力で引き伸ばしていない場合はチェックを入れてください。全体が同じ倍率で引き伸ばされます。</span>
+        </label>
+    </div>
+
+    <button type="button" class="btn-process" onclick="processMC()">✨ BPMの倍取りを実行</button>
+
+    <div id="resultMsg"></div>
+    <a id="dlLink" href="#">💾 変換済みファイルをダウンロード</a>
+</div>
+
+<script>
+function safeBeat(beat) {
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
+    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
+}
+
+function beatToPoint(beat) {
+    let b = safeBeat(beat);
+    return b[0] + (b[1] / b[2]);
+}
+
+function gcd(a, b) {
+    a = Math.abs(a); b = Math.abs(b);
+    return b === 0 ? (a === 0 ? 1 : a) : gcd(b, a % b);
+}
+
+// 倍率(小数可)を分数 {num, den} に変換する
+function decimalToFraction(x) {
+    if (Number.isInteger(x)) return { num: x, den: 1 };
+    let s = x.toString();
+    if (s.indexOf('e') !== -1 || s.indexOf('E') !== -1) {
+        // 指数表記の場合は十分な精度の分数に丸める
+        let den = 1000000;
+        let num = Math.round(x * den);
+        let g = gcd(num, den);
+        return { num: num / g, den: den / g };
+    }
+    let decimals = (s.split('.')[1] || '').length;
+    let den = Math.pow(10, decimals);
+    let num = Math.round(x * den);
+    let g = gcd(num, den);
+    return { num: num / g, den: den / g };
+}
+
+// Beatの数値を指定倍率で正確に引き伸ばす関数（分数演算）
+function multiplyBeat(beat, mulFrac) {
+    let b = safeBeat(beat);
+    let m = b[0], n = b[1], d = b[2];
+
+    // 元の値を (m*d + n) / d の分数として扱い、倍率を掛ける
+    let totalNum = (m * d + n) * mulFrac.num;
+    let totalDen = d * mulFrac.den;
+
+    let newM = Math.floor(totalNum / totalDen);
+    let remainderNum = totalNum - newM * totalDen;
+
+    if (remainderNum === 0) return [newM, 0, 0];
+    let g = gcd(remainderNum, totalDen);
+    return [newM, remainderNum / g, totalDen / g];
+}
+
+function processMC() {
+    const fileInput = document.getElementById("mcFile");
+    const multiplierInput = document.getElementById("multiplier");
+    const doubleTimeBeat = document.getElementById("doubleTimeBeat").checked;
+    const doubleAllBeat = document.getElementById("doubleAllBeat").checked;
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlLink");
+    
+    msgDiv.innerHTML = "";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "ファイルを選択してください。";
+    }
+
+    const multiplier = parseFloat(multiplierInput.value);
+    if (!multiplier || multiplier <= 0) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "倍率には0より大きい数値を入力してください。";
+    }
+    const mulFrac = decimalToFraction(multiplier);
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            let rawStr = e.target.result;
+            let cleanStr = rawStr.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            
+            if (!data.time || !Array.isArray(data.time)) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "譜面データにBPM情報 (time配列) が見つかりませんでした。";
+            }
+
+            let logTexts =[];
+            let convertedBpmCount = 0;
+
+            // 1. timeイベントのBPM数値とタイミングを倍率分引き伸ばす
+            for (let i = 0; i < data.time.length; i++) {
+                let ev = data.time[i];
+                
+                // BPMの数値を倍率分にする
+                if (typeof ev.bpm === 'number') {
+                    let oldBpm = ev.bpm;
+                    // 浮動小数点演算特有の微小な誤差が出ないよう有効数字15桁で丸める
+                    let newBpm = parseFloat((oldBpm * multiplier).toPrecision(15));
+                    ev.bpm = newBpm;
+                    convertedBpmCount++;
+                    
+                    if (convertedBpmCount <= 10) {
+                        logTexts.push(`⏱️ BPM変更 : ${oldBpm} ➡️ <b>${newBpm}</b>`);
+                    } else if (convertedBpmCount === 11) {
+                        logTexts.push(`...他 ${data.time.length - 10} 箇所のBPMを処理しました`);
+                    }
+                }
+                
+                // タイミングも倍率分にする
+                if (doubleTimeBeat && ev.beat) {
+                    ev.beat = multiplyBeat(ev.beat, mulFrac);
+                }
+            }
+
+            // タイミングが変わった可能性があるのでソートし直す
+            if (doubleTimeBeat) {
+                data.time.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+            }
+
+            // 2. ノーツやエフェクトのタイミングもすべて倍率分にする場合
+            if (doubleAllBeat) {
+                if (data.note && Array.isArray(data.note)) {
+                    for (let n of data.note) {
+                        if (n.beat) n.beat = multiplyBeat(n.beat, mulFrac);
+                        if (n.seg && Array.isArray(n.seg)) {
+                            for (let s of n.seg) {
+                                if (s.beat) s.beat = multiplyBeat(s.beat, mulFrac);
+                            }
+                        }
+                    }
+                    data.note.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+                    logTexts.push(`🎵 すべてのノーツの配置タイミングを ${multiplier}倍 にしました`);
+                }
+                
+                if (data.effect && Array.isArray(data.effect)) {
+                    for (let e of data.effect) {
+                        if (e.beat) e.beat = multiplyBeat(e.beat, mulFrac);
+                    }
+                    data.effect.sort((a, b) => beatToPoint(safeBeat(a.beat)) - beatToPoint(safeBeat(b.beat)));
+                    logTexts.push(`✨ すべてのエフェクトの配置タイミングを ${multiplier}倍 にしました`);
+                }
+            }
+
+            if (convertedBpmCount === 0) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "BPMのデータが1つも見つかりませんでした。";
+            }
+
+            const outJson = JSON.stringify(data); 
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            
+            dlLink.href = url;
+            let originalName = file.name;
+            let dotIndex = originalName.lastIndexOf('.');
+            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
+            dlLink.download = originalName + "_x" + multiplier + "_bpm.mc";
+            
+            dlLink.style.display = "block";
+            
+            msgDiv.style.color = "#28a745";
+            msgDiv.innerHTML = `<b>🎉 変換完了！ 合計 ${convertedBpmCount} 箇所のBPMを ${multiplier}倍 に処理しました！</b><br>
+            <div class="log-box">${logTexts.join("<br>")}</div>`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = `<b>ファイルの解析に失敗しました。</b><br>
+            <div class="log-box error-log">エラー詳細：<br>${err.message}</div>`;
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
+
+</body>
+</html>
