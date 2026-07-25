@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スライド直列マージツール</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        .container { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        h1 { font-size: 1.4em; text-align: center; margin-bottom: 20px; color: #222; }
+        .desc { font-size: 0.85em; color: #555; margin-top: -10px; margin-bottom: 20px; line-height: 1.4; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        textarea.beatList { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; font-family: monospace; resize: vertical; }
+        
+        .mode-group { background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffe0b2; }
+        .mode-group label { display: block; margin-bottom: 10px; cursor: pointer; font-weight: normal; }
+        .mode-group label:last-child { margin-bottom: 0; }
+
+        .patrol-group { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbdefb; }
+        .patrol-group label { display: block; cursor: pointer; font-weight: normal; }
+        .patrol-group .patrol-title { font-weight: bold; margin-bottom: 8px; color: #0d47a1; }
+        .patrol-group .patrol-desc { font-size: 0.8em; color: #555; margin-left: 25px; line-height: 1.4; }
+        
+        .range-group { background: #f9f9f9; border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .range-group h4 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+        
+        button { padding: 12px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; width: 100%; font-weight: bold; transition: 0.2s; margin-top: 10px; }
+        .btn-add { background: #17a2b8; margin-bottom: 20px; }
+        .btn-add:hover { background: #138496; }
+        .btn-remove { background: #dc3545; padding: 8px 15px; margin-top: 5px; font-size: 0.9em; width: auto; float: right; }
+        .btn-remove:hover { background: #c82333; }
+        .btn-process { background: #007bff; font-size: 1.1em; padding: 15px; box-shadow: 0 4px 6px rgba(0, 123, 255, 0.3); }
+        .btn-process:hover { background: #0056b3; }
+        
+        .clearfix::after { content: ""; clear: both; display: table; }
+        #dlLink { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: 0.2s; box-shadow: 0 4px 6px rgba(40, 167, 69, 0.3); }
+        #dlLink:hover { background: #218838; }
+        #resultMsg { margin-top: 15px; font-size: 0.9em; font-weight: bold; line-height: 1.6; }
+        .log-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 0.85em; font-family: monospace; color: #555; margin-top: 10px; }
+        .error-log { color: #d32f2f; background: #ffebee; border-color: #f5c6cb; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🔗 スライド直列マージツール</h1>
+    <p class="desc">
+        選択された<b>スライドノーツのみ</b>を、順番通りに<b>1つの連続したスライド</b>に結合します。<br>
+        Tap・Wipeなどの通常ノーツは対象外です。敷スライド（逆走・折り返し）も形を崩さずにそのまま結合できます。
+    </p>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>📁 対象の .mcファイルを選択</label>
+        <input type="file" id="mcFile" accept="*/*">
+    </div>
+
+    <!-- 選択方式の切り替え -->
+    <div class="mode-group">
+        <label style="font-weight: bold; margin-bottom: 10px; color: #e65100;">⚙️ ノーツの選択方式</label>
+        <label>
+            <input type="radio" name="selectMode" value="range" checked onchange="switchMode()"> <b>範囲指定</b>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定した始点から終点の間にあるすべてのノーツを結合します。</span>
+        </label>
+        <label style="margin-top: 5px;">
+            <input type="radio" name="selectMode" value="exact" onchange="switchMode()"> <b>タイミング完全指定</b>
+            <span style="font-size:0.85em; color:#666; margin-left:25px; display:block;">指定した「特定のBeat上」にあるノーツのみを結合します。</span>
+        </label>
+    </div>
+
+    <!-- 重複パトロールの切り替え -->
+    <div class="patrol-group">
+        <div class="patrol-title">🛡️ 重複パトロール（直角スライド補正）</div>
+        <label>
+            <input type="radio" name="patrolMode" value="on" checked> <b>ON</b>（推奨・通常スライド用）
+            <span class="patrol-desc">同一Beatのsegが重なった場合、微小ずらしで自動回避します。ただし接合点は自動でマージされます。</span>
+        </label>
+        <label style="margin-top: 8px;">
+            <input type="radio" name="patrolMode" value="off"> <b>OFF</b>（逆走・折り返しスライド用）
+            <span class="patrol-desc">segの並び順や間隔を一切変更しません。「行ったり来たり」する敷スライド同士を結合するときに順序が壊れるのを防ぎます。</span>
+        </label>
+    </div>
+
+    <div id="rangesContainer">
+        <!-- JSでボックスが挿入されます -->
+    </div>
+
+    <button type="button" class="btn-add" onclick="addRange()">➕ 結合グループを追加する</button>
+    <button type="button" class="btn-process" onclick="processMC()">✨ 直列マージを実行</button>
+
+    <div id="resultMsg"></div>
+    <a id="dlLink" href="#">💾 結合済みファイルをダウンロード</a>
+</div>
+
+<script>
+let rangeIdCounter = 1;
+let currentMode = "range";
+
+// 初回読み込み時に表示
+window.onload = function() {
+    addRange();
+};
+
+function switchMode() {
+    currentMode = document.querySelector('input[name="selectMode"]:checked').value;
+    document.getElementById("rangesContainer").innerHTML = "";
+    rangeIdCounter = 1;
+    addRange();
+}
+
+function addRange() {
+    const container = document.getElementById("rangesContainer");
+    const id = "group-" + rangeIdCounter++;
+    
+    let html = "";
+    if (currentMode === "range") {
+        html = `
+        <div class="range-group clearfix" id="${id}">
+            <h4>結合グループ 1</h4>
+            <div class="form-group">
+                <label>始点Beat</label>
+                <input type="text" class="startBeat" placeholder="例: 10, 0, 1">
+            </div>
+            <div class="form-group">
+                <label>終点Beat</label>
+                <input type="text" class="endBeat" placeholder="例: 15, 0, 0">
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+        </div>
+        `;
+    } else {
+        html = `
+        <div class="range-group clearfix" id="${id}">
+            <h4>結合グループ 1</h4>
+            <div class="form-group">
+                <label>対象のBeat (1行に1つずつ入力)</label>
+                <textarea class="beatList" rows="4" placeholder="例:\n10, 0, 1\n10, 0, 1\n11, 0, 1\n12, 1, 4"></textarea>
+            </div>
+            <button type="button" class="btn-remove" onclick="removeRange('${id}')">🗑️ 削除</button>
+        </div>
+        `;
+    }
+    
+    container.insertAdjacentHTML('beforeend', html);
+    updateRangeLabels();
+}
+
+function removeRange(id) {
+    const container = document.getElementById("rangesContainer");
+    if (container.children.length <= 1) {
+        alert("最低でも1つの結合グループが必要です！");
+        return;
+    }
+    document.getElementById(id).remove();
+    updateRangeLabels();
+}
+
+function updateRangeLabels() {
+    const groups = document.querySelectorAll('.range-group h4');
+    groups.forEach((el, index) => {
+        el.innerText = `結合グループ ${index + 1}`;
+    });
+}
+
+function safeBeat(beat) {
+    if (!beat || !Array.isArray(beat) || beat.length < 3) return [0, 0, 1];
+    return [beat[0], beat[1], beat[2] === 0 ? 1 : beat[2]];
+}
+
+function beatToPoint(beat) {
+    let b = safeBeat(beat);
+    return b[0] + (b[1] / b[2]);
+}
+
+function parseBeat(str) {
+    if (!str) return null;
+    str = str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const parts = str.match(/-?\d+/g);
+    if (parts && parts.length >= 3) {
+        return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    }
+    return null;
+}
+
+function gcd(a, b) { a = Math.abs(a); b = Math.abs(b); return b === 0 ? a : gcd(b, a % b); }
+
+// ★修正: 負のseg (逆走) にも対応した beatAdd
+function beatAdd(beat1, beat2) {
+    let b1 = safeBeat(beat1), b2 = safeBeat(beat2);
+    const m1 = b1[0], n1 = b1[1], d1 = b1[2];
+    const m2 = b2[0], n2 = b2[1], d2 = b2[2];
+    // 全体を「d1*d2 分母」の分子として合成 (符号込み)
+    const totalNum = (m1 * d1 + n1) * d2 + (m2 * d2 + n2) * d1;
+    const den = d1 * d2;
+    const m = Math.floor(totalNum / den);
+    const n = totalNum - (m * den);
+    if (n === 0) return [m, 0, 0];
+    const g = gcd(n, den);
+    return [m, n / g, den / g];
+}
+
+// 負の時間を許容するBeat差分計算 (敷スライドの逆走対応)
+function beatSubSigned(beat1, beat2) {
+    let b1 = safeBeat(beat1), b2 = safeBeat(beat2);
+    const m1 = b1[0], n1 = b1[1], d1 = b1[2];
+    const m2 = b2[0], n2 = b2[1], d2 = b2[2];
+    
+    const num1 = (m1 * d1 + n1) * d2;
+    const num2 = (m2 * d2 + n2) * d1;
+    const den = d1 * d2;
+    
+    let diffNum = num1 - num2;
+    const m = Math.floor(diffNum / den);
+    const n = diffNum - (m * den);
+    
+    if (n === 0) return [m, 0, 0];
+    const g = gcd(n, den);
+    return [m, n / g, den / g];
+}
+
+// ★修正版パトロール:
+//  - 接合点(前segと次スライド始点が同一位置)は「重複ずらし」せず、片方を静かにマージ扱いにする
+//  - "配列順" ではなく "各segの独立性" を尊重: 判定は全体マップで衝突する箇所のみ最小限にずらす
+//  - protectIndices に含まれる index は「動かしてはいけない骨格」として絶対に維持し、周りをずらす
+function fixDuplicateSegs(segArray, protectIndices) {
+    const protect = new Set(protectIndices || []);
+    let fixedCount = 0;
+    const MICRO_DEN = 10000;
+
+    function addMicroOffset(beat, offsetCount) {
+        if (!beat || beat.length !== 3 || offsetCount === 0) return beat;
+        const m = beat[0], n = beat[1] || 0, d = beat[2] === 0 ? 1 : beat[2];
+        const num = (m * d + n) * MICRO_DEN + offsetCount * d;
+        const den = d * MICRO_DEN;
+        const newM = Math.floor(num / den);
+        const newN = num - (newM * den);
+        if (newN === 0) return [newM, 0, 0];
+        const g = gcd(newN, den);
+        return [newM, newN / g, den / g];
+    }
+
+    // 骨格 (protect) のポイントを先に登録
+    let usedPoints = [0];
+    for (let i = 0; i < segArray.length; i++) {
+        if (protect.has(i)) {
+            usedPoints.push(beatToPoint(segArray[i].beat));
+        }
+    }
+
+    for (let i = 0; i < segArray.length; i++) {
+        if (protect.has(i)) continue; // 骨格は動かさない
+        let segItem = segArray[i];
+        let p = beatToPoint(segItem.beat);
+        
+        let conflictCount = 0;
+        let currentP = p;
+        
+        while (true) {
+            let isConflict = false;
+            for (let j = 0; j < usedPoints.length; j++) {
+                if (Math.abs(currentP - usedPoints[j]) < 1e-5) {
+                    isConflict = true;
+                    break;
+                }
+            }
+            if (!isConflict) break;
+            
+            conflictCount++;
+            currentP = p + (conflictCount / MICRO_DEN);
+        }
+        
+        if (conflictCount > 0) {
+            segItem.beat = addMicroOffset(segItem.beat, conflictCount);
+            fixedCount++;
+        }
+        usedPoints.push(currentP);
+    }
+    return fixedCount;
+}
+
+function processMC() {
+    const fileInput = document.getElementById("mcFile");
+    const selectMode = document.querySelector('input[name="selectMode"]:checked').value;
+    const patrolMode = document.querySelector('input[name="patrolMode"]:checked').value; // "on" | "off"
+    
+    const msgDiv = document.getElementById("resultMsg");
+    const dlLink = document.getElementById("dlLink");
+    
+    msgDiv.innerHTML = "";
+    dlLink.style.display = "none";
+
+    if (!fileInput.files.length) {
+        msgDiv.style.color = "#d32f2f";
+        return msgDiv.innerHTML = "ファイルを選択してください。";
+    }
+
+    const rangeGroups = document.querySelectorAll('.range-group');
+    const parsedGroups = [];
+    
+    // 入力データの解析
+    for (let i = 0; i < rangeGroups.length; i++) {
+        let groupObj = { index: i + 1, type: selectMode };
+        
+        if (selectMode === "range") {
+            const startStr = rangeGroups[i].querySelector('.startBeat').value;
+            const endStr = rangeGroups[i].querySelector('.endBeat').value;
+            const startBeat = parseBeat(startStr);
+            const endBeat = parseBeat(endStr);
+            
+            if (!startBeat || !endBeat) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = `⚠️ 結合グループ ${i + 1} のBeatフォーマットが正しくありません。`;
+            }
+            const startPoint = beatToPoint(startBeat);
+            const endPoint = beatToPoint(endBeat);
+            groupObj.min = Math.min(startPoint, endPoint);
+            groupObj.max = Math.max(startPoint, endPoint);
+            
+        } else {
+            const textStr = rangeGroups[i].querySelector('.beatList').value;
+            const lines = textStr.split('\n');
+            const points = [];
+            
+            for (let line of lines) {
+                if (line.trim() === "") continue;
+                let b = parseBeat(line);
+                if (b) {
+                    points.push(beatToPoint(b));
+                }
+            }
+            if (points.length < 2) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = `⚠️ 結合グループ ${i + 1} で指定された有効なBeatが2つ未満です。改行して2つ以上入力してください。`;
+            }
+            groupObj.points = points;
+        }
+        parsedGroups.push(groupObj);
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            let rawStr = e.target.result;
+            let cleanStr = rawStr.replace(/^\uFEFF/, '').trim();
+            const data = JSON.parse(cleanStr);
+            
+            if (!data.note || !Array.isArray(data.note)) {
+                throw new Error("譜面データに note 配列が存在しません。");
+            }
+
+            const notes = data.note;
+            let allDeletedNotes = new Set();
+            let totalJoinedCount = 0;
+            let logTexts = [];
+
+            for (let r = 0; r < parsedGroups.length; r++) {
+                const group = parsedGroups[r];
+                const targetNotes = [];
+
+                // ★スライドノーツのみ抽出（segを持つものだけが対象）
+                for (let i = 0; i < notes.length; i++) {
+                    const note = notes[i];
+                    if (allDeletedNotes.has(note)) continue;
+
+                    if (typeof note.x === 'number' && note.seg && Array.isArray(note.seg)) {
+                        const point = beatToPoint(safeBeat(note.beat));
+                        
+                        if (group.type === "range") {
+                            if (point >= group.min - 0.001 && point <= group.max + 0.001) {
+                                note._origIdx = i; 
+                                targetNotes.push(note);
+                            }
+                        } else {
+                            let match = false;
+                            for (let p of group.points) {
+                                if (Math.abs(point - p) < 1e-5) {
+                                    match = true;
+                                    break;
+                                }
+                            }
+                            if (match) {
+                                note._origIdx = i;
+                                targetNotes.push(note);
+                            }
+                        }
+                    }
+                }
+
+                if (targetNotes.length < 2) {
+                    logTexts.push(`<span style="color:#d32f2f;">⚠️ グループ ${group.index}: 結合対象が2つ未満のためスキップ</span>`);
+                    continue;
+                }
+
+                // 1. ノーツ全体を時間が早い順(始点順)にソート。同じ時間なら配置順を維持。
+                targetNotes.sort((a, b) => {
+                    let pA = beatToPoint(safeBeat(a.beat));
+                    let pB = beatToPoint(safeBeat(b.beat));
+                    if (Math.abs(pA - pB) > 1e-5) {
+                        return pA - pB;
+                    }
+                    return a._origIdx - b._origIdx;
+                });
+                
+                // メインとなる最初のノーツ
+                const mainSlide = targetNotes[0];
+                const mainBeat = safeBeat(mainSlide.beat);
+                const mainX = mainSlide.x;
+
+                // 展開した全てのポイント(始点+seg)を絶対Beatで保持
+                // 各要素: { beat, x, isAnchor: true/false }
+                //   isAnchor = 「そのスライドの本来の始点」= 骨格として保護
+                let absPoints = []; 
+
+                // メインノーツが持つ既存のsegを追加（逆行もそのまま）
+                if (mainSlide.seg && Array.isArray(mainSlide.seg)) {
+                    for (let s of mainSlide.seg) {
+                        absPoints.push({
+                            beat: beatAdd(mainBeat, s.beat),
+                            x: mainX + s.x,
+                            isAnchor: false
+                        });
+                    }
+                }
+
+                // 2番目以降のノーツを順番に追加していく
+                let mergedJoins = 0;
+                for (let i = 1; i < targetNotes.length; i++) {
+                    let note = targetNotes[i];
+                    let nBeat = safeBeat(note.beat);
+                    let nX = note.x;
+
+                    // ★接合点マージ: 直前のabsPointsの末尾が
+                    //   (beat, x) ともにこのノーツの始点と一致するなら
+                    //   その1つを吸収 (patrolによるズレの主因を排除)
+                    let joinPointBeat = nBeat;
+                    let joinPointX = nX;
+                    let skipStart = false;
+                    if (absPoints.length > 0) {
+                        const last = absPoints[absPoints.length - 1];
+                        if (Math.abs(beatToPoint(last.beat) - beatToPoint(joinPointBeat)) < 1e-5
+                            && last.x === joinPointX) {
+                            // 完全一致 → 前segを anchor に昇格させて始点を差し込まない
+                            last.isAnchor = true;
+                            skipStart = true;
+                            mergedJoins++;
+                        }
+                    }
+
+                    if (!skipStart) {
+                        // 前segの終点と時刻がほぼ同じなのに座標(x)が違う場合、
+                        // 完全に同一Beatのまま並べると「カクっ」とした段差にならない
+                        // （エンジン側で同一時刻2点が潰れる恐れがある）ため、
+                        // 次スライドの始点segのタイミングを1/65536だけ後ろにずらす。
+                        let pushBeat = nBeat;
+                        if (absPoints.length > 0) {
+                            const last = absPoints[absPoints.length - 1];
+                            if (Math.abs(beatToPoint(last.beat) - beatToPoint(nBeat)) < 1e-5) {
+                                pushBeat = beatAdd(nBeat, [0, 1, 65536]);
+                            }
+                        }
+                        absPoints.push({ beat: pushBeat, x: nX, isAnchor: true });
+                    }
+
+                    // そのノーツが持つseg（敷スライド・逆走など）を順番そのままに追加
+                    if (note.seg && Array.isArray(note.seg)) {
+                        for (let s of note.seg) {
+                            absPoints.push({
+                                beat: beatAdd(nBeat, s.beat),
+                                x: nX + s.x,
+                                isAnchor: false
+                            });
+                        }
+                    }
+                }
+
+                let newSeg = [];
+                let protectIndices = [];
+                
+                // メインの始点からの「相対Beat(マイナス許容)」「相対X座標」に変換
+                for (let idx = 0; idx < absPoints.length; idx++) {
+                    let p = absPoints[idx];
+                    newSeg.push({
+                        beat: beatSubSigned(p.beat, mainBeat),
+                        x: p.x - mainX
+                    });
+                    if (p.isAnchor) protectIndices.push(idx);
+                }
+
+                // 重複パトロール (ON時のみ・逆走スライド骨格は保護)
+                let fixCount = 0;
+                if (patrolMode === "on") {
+                    fixCount = fixDuplicateSegs(newSeg, protectIndices);
+                }
+                mainSlide.seg = newSeg;
+
+                for (let i = 1; i < targetNotes.length; i++) {
+                    allDeletedNotes.add(targetNotes[i]);
+                }
+
+                totalJoinedCount += targetNotes.length;
+                let fixMsg = "";
+                if (patrolMode === "on") {
+                    fixMsg = fixCount > 0 ? ` (重複 ${fixCount}箇所を補正✨)` : "";
+                } else {
+                    fixMsg = ` <span style="color:#0d47a1;">[パトロールOFF]</span>`;
+                }
+                let joinMsg = mergedJoins > 0 ? ` (接合点 ${mergedJoins}箇所をマージ)` : "";
+                logTexts.push(`<span style="color:#28a745;">✅ グループ ${group.index}: ${targetNotes.length}個のノーツを1つに結合しました${fixMsg}${joinMsg}</span>`);
+            }
+
+            if (totalJoinedCount === 0) {
+                msgDiv.style.color = "#d32f2f";
+                return msgDiv.innerHTML = "指定された条件で結合可能なノーツが見つかりませんでした。";
+            }
+
+            data.note = data.note.filter(n => !allDeletedNotes.has(n));
+
+            const outJson = JSON.stringify(data); 
+            const blob = new Blob([outJson], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            
+            dlLink.href = url;
+            let originalName = file.name;
+            let dotIndex = originalName.lastIndexOf('.');
+            if(dotIndex !== -1) { originalName = originalName.substring(0, dotIndex); }
+            dlLink.download = originalName + "_merged.mc";
+            
+            dlLink.style.display = "block";
+            
+            msgDiv.style.color = "#28a745";
+            msgDiv.innerHTML = `<b>🎉 結合完了！ 合計 ${totalJoinedCount}個 のノーツを処理しました！</b><br>
+            <div class="log-box">${logTexts.join("<br>")}</div>`;
+
+        } catch (err) {
+            console.error(err);
+            msgDiv.style.color = "#d32f2f";
+            msgDiv.innerHTML = `<b>ファイルの解析に失敗しました。</b><br>
+            <div class="log-box error-log">エラー詳細：<br>${err.message}</div>`;
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
+
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
+</body>
+</html>
