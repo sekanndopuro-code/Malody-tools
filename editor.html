@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Slide Editor Web (Fixed & Optimized)</title>
+<title>Slide Editor Web (prototype)</title>
 <style>
 html,body{height:100%;margin:0;overflow:hidden;background:#151520;color:#ddd;font:14px system-ui;-webkit-user-select:none;user-select:none}
 body{display:flex;flex-direction:column}
@@ -76,9 +76,8 @@ const $=s=>document.querySelector(s);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const mod=(a,n)=>((a%n)+n)%n;
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-const b2f=b=>(b&&b[2])?b[0]+b[1]/b[2]:(b?b[0]:0);
+const b2f=b=>(b&&b[2])?b[0]+b[1]/b[2]:(b?b[0]:0);  // beat配列→小数（分母0も安全に処理：結合生成の[m,0,0]でNaNにならない）
 function fracBeat(v,den){const num=Math.round(v*den);return[Math.floor(num/den),mod(num,den),den];}
-
 /* ========== 状態 ========== */
 const cv=$('#cv'),ctx=cv.getContext('2d');
 let W=0,H=0,DPR=1,trackL=8,trackW=1,playY=0;
@@ -86,17 +85,19 @@ let ppb=60,viewBeat=0,curBeat=0,snapDen=4;
 let tool='move';
 const barW=26;
 let mini=null,mctx=null,totalBeats=1;
-let nmin=new Float64Array(0),nmax=new Float64Array(0),order=[];
-let data=null,notes=[],starts=new Float64Array(0);
-let sel=new Set(),baseName='chart';
-let chainOrder=[],chainOrderSet=new Set();
+let nmin=new Float64Array(0),nmax=new Float64Array(0);
+let data=null,notes=[],starts=new Float64Array(0),order=[];
+let sel=new Set(),baseName='chart';           // sel は永続ID(nid)の集合
+let chainOrder=[];                            // 「順番に選択」ツールで選択したnidの順序付き配列
+let chainOrderSet=new Set();                  // 高速参照用（chainOrderと同期）
 let dirty=true,rafPend=false;
-
-/* ===== ノーツ永続ID ===== */
+/* ===== ノーツ永続ID (プラグインからの参照用) =====
+配列indexは削除/追加で容易にズレるため、ノーツオブジェクトの identity に
+対して WeakMap でIDを振り、id⇔index の対応表を rebuildIndex() の都度作り直す。
+このIDはファイル保存時のJSONには一切含まれない（セッション内のみ有効）。 */
 let noteId=new WeakMap(),nextNid=1,idToIdx=new Map();
 function nidOf(n){let id=noteId.get(n);if(id==null){id=nextNid++;noteId.set(n,id);}return id;}
 function idxOf(nid){return idToIdx.has(nid)?idToIdx.get(nid):-1;}
-
 /* ===== undo/redo ===== */
 let undoStack=[],redoStack=[];
 const snap=()=>JSON.stringify(notes);
@@ -108,13 +109,12 @@ function redo(){if(!redoStack.length||!data)return;
 undoStack.push(snap());notes=JSON.parse(redoStack.pop());data.note=notes;
 sel.clear();chainOrder.length=0;chainOrderSet.clear();rebuildIndex();req();}
 $('#bUndo').onclick=undo;$('#bRedo').onclick=redo;
-addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey))return;
+addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey))return;   // デスクトップ補助
 const k=e.key.toLowerCase();
 if(k==='z'){e.preventDefault();e.shiftKey?redo():undo();}
 else if(k==='y'){e.preventDefault();redo();}});
-
 /* ========== 座標変換 ========== */
-const x2px=x=>trackL+(x||0)/255*trackW; // xがNaN/undefined対策
+const x2px=x=>trackL+x/255*trackW;
 const px2x=p=>(p-trackL)/trackW*255;
 const b2y=b=>playY-(b-viewBeat)*ppb;
 const y2b=y=>viewBeat+(playY-y)/ppb;
@@ -122,7 +122,6 @@ function resize(){DPR=Math.min(2,devicePixelRatio||1);W=cv.clientWidth;H=cv.clie
 cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);
 trackL=barW+8;trackW=W-trackL-8;playY=H*0.62;buildMini();req();}
 addEventListener('resize',resize);
-
 /* ========== BPM / 時刻 ========== */
 let bpmL=[];
 function rebuildBpm(){bpmL.length=0;for(const e of(data?.time||[]))bpmL.push({b:b2f(e.beat),spb:60/e.bpm});
@@ -130,14 +129,13 @@ if(!bpmL.length)bpmL.push({b:0,spb:60/220});}
 function secAt(i){let t=0;for(let k=1;k<=i;k++)t+=(bpmL[k].b-bpmL[k-1].b)*bpmL[k-1].spb;return t;}
 function beatToSec(b){let i=bpmL.length-1;while(i>0&&bpmL[i].b>b)i--;return secAt(i)+(b-bpmL[i].b)*bpmL[i].spb;}
 function secToBeat(t){let i=0;while(i<bpmL.length-1&&t>=secAt(i+1))i++;return bpmL[i].b+(t-secAt(i))/bpmL[i].spb;}
-
 /* ========== オーディオブロック ========== */
 let AC=null,buffer=null,srcN=null,playStart=0,playing=false,started=false,offsetMs=0;
 let playFromSec=0;
 const ac=()=>AC||(AC=new(window.AudioContext||window.webkitAudioContext)());
 const songSec=()=>AC.currentTime-playStart+playFromSec;
 function play(){const a=ac();
-if(!started){
+if(!started){                                   // 初回/stop後のみ音源スタート
 const startSec=beatToSec(curBeat);playFromSec=startSec;
 if(buffer){const bufOff=startSec-offsetMs/1000;
 srcN=a.createBufferSource();srcN.buffer=buffer;srcN.connect(a.destination);
@@ -147,15 +145,14 @@ else playStart=a.currentTime;
 started=true;}
 a.resume();playing=true;$('#bPlay').textContent='⏸';loop();}
 function pause(){if(!playing)return;playing=false;
-curBeat=secToBeat(songSec());
-if(AC)AC.suspend();
+curBeat=secToBeat(songSec());                   // 凍結時点を正確に保持
+if(AC)AC.suspend();                             // クロック凍結＝サンプル精度で停止
 $('#bPlay').textContent='▶';req();}
 function stopPlay(){playing=false;started=false;stopSrc();
 if(AC)AC.resume();curBeat=0;viewBeat=0;$('#bPlay').textContent='▶';req();}
 function stopSrc(){if(srcN){try{srcN.stop()}catch(e){}srcN=null;}}
 function nudge(d){offsetMs+=d;$('#oV').value=offsetMs;if(playing)playStart-=d/1000;req();}
-
-/* ===== インデックス再構築 ===== */
+/* ===== インデックス：min/max beatを保持（segの折り返し・マイナスも含む） ===== */
 function rebuildIndex(){const m=notes.length;
 nmin=new Float64Array(m);nmax=new Float64Array(m);order.length=0;idToIdx.clear();
 for(let i=0;i<m;i++){const n=notes[i];
@@ -169,8 +166,7 @@ order.sort((a,b)=>nmin[a]-nmin[b]);
 buildMini();}
 function upperBound(t){let a=0,b=order.length;while(a<b){const m=(a+b)>>1;
 if(nmin[order[m]]<=t)a=m+1;else b=m;}return a;}
-
-/* ===== ミニマップ ===== */
+/* ===== ミニマップ（構造変更時のみ焼直し） ===== */
 function buildMini(){if(!data||H<10)return;
 if(!mini){mini=document.createElement('canvas');mctx=mini.getContext('2d');}
 mini.width=barW*DPR;mini.height=H*DPR;mctx.setTransform(DPR,0,0,DPR,0,0);
@@ -182,13 +178,12 @@ mctx.fillStyle=n.type===4?'#e6cf3f':(n.seg?'#8fd0f0':'#ddd');
 mctx.fillRect(3,H-b2f(n.beat)/totalBeats*H,barW-6,1.5);}}
 const miniY=b=>H-clamp(b,0,totalBeats)/totalBeats*H;
 function drawMini(){if(!mini)return;ctx.drawImage(mini,0,0,barW,H);if(!data)return;
-const t=miniY(y2b(0)),b=miniY(y2b(H));
+const t=miniY(y2b(0)),b=miniY(y2b(H));           // 表示ウィンドウ枠
 ctx.fillStyle='rgba(255,255,255,.13)';ctx.fillRect(0,t,barW,Math.max(2,b-t));
 ctx.strokeStyle='rgba(255,255,255,.5)';ctx.beginPath();
 ctx.moveTo(0,t+.5|0);ctx.lineTo(barW,t+.5|0);ctx.moveTo(0,b+.5|0);ctx.lineTo(barW,b+.5|0);ctx.stroke();
-ctx.strokeStyle='#f44';const pm=miniY(playing?viewBeat:curBeat)|0;
+ctx.strokeStyle='#f44';const pm=miniY(playing?viewBeat:curBeat)|0;   // 再生マーカー
 ctx.beginPath();ctx.moveTo(0,pm+.5);ctx.lineTo(barW,pm+.5);ctx.stroke();}
-
 /* ========== 描画ループ ========== */
 function req(){if(!rafPend){rafPend=true;requestAnimationFrame(()=>{rafPend=false;render();});}}
 function loop(){if(!playing)return;
@@ -196,8 +191,7 @@ const s=songSec();viewBeat=secToBeat(s);
 if(buffer&&s>buffer.duration+0.5){pause();return;}
 $('#time').textContent=fmt(s);render();requestAnimationFrame(loop);}
 const fmt=s=>{s=Math.max(0,s);const m=s/60|0,ss=s%60;return m+':'+(ss<10?'0':'')+ss.toFixed(2);};
-
-/* ===== 描画 ===== */
+/* ===== 描画：厳密culling（1beatでも重なれば描画） ===== */
 function render(){ctx.clearRect(0,0,W,H);drawMini();drawGrid();
 if(data){const v0=y2b(H),v1=y2b(0),hi=upperBound(v1);
 for(let k=0;k<hi;k++){const i=order[k];if(nmax[i]<v0)continue;drawNote(i);}
@@ -207,31 +201,35 @@ if(nmax[i]>=v0&&notes[i]&&sel.has(nidOf(notes[i]))&&notes[i].seg)drawRibbonStrok
 drawChainOverlay(v0);
 drawBox();}
 drawModules();drawPlayline();}
-
+/* ===== 「順番に選択」用: 選択済みスライドを半透明カラー＋順番番号でオーバーレイ ===== */
 function drawChainOverlay(v0){if(!chainOrder.length)return;
 for(let k=0;k<chainOrder.length;k++){const nid=chainOrder[k];const i=idxOf(nid);if(i<0)continue;
 const n=notes[i];if(!n||n.sound||!n.seg)continue;
 if(nmax[i]<v0)continue;
 const b0=b2f(n.beat),pts=segPts(n,b0),hw=(n.w||57)/255*trackW/2;
+// 半透明の被せ色（1番目=赤 / それ以降=水色）
 const col=(k===0)?'rgba(255,60,60,.55)':'rgba(90,200,255,.45)';
 ctx.fillStyle=col;
-ctx.beginPath();
+ctx.beginPath();                                  // 1パスに集約して1回fill
 for(let p=0;p<pts.length-1;p++){const a=pts[p],b=pts[p+1];
 if((a.py<-40&&b.py<-40)||(a.py>H+40&&b.py>H+40))continue;
 ctx.moveTo(a.px-hw,a.py);ctx.lineTo(a.px+hw,a.py);
 ctx.lineTo(b.px+hw,b.py);ctx.lineTo(b.px-hw,b.py);
 ctx.closePath();}
 ctx.fill();
+// 始点bar強調
 const y=b2y(b0),w=(n.w||57)/255*trackW;
 ctx.fillStyle=(k===0)?'rgba(255,60,60,.85)':'rgba(90,200,255,.85)';
 ctx.fillRect(x2px(n.x)-w/2,y-4,w,8);
+// 順番数字
 ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=3;
 ctx.font='bold 15px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
 const label=String(k+1);
 ctx.strokeText(label,x2px(n.x),y);
 ctx.fillText(label,x2px(n.x),y);
 ctx.textAlign='start';ctx.textBaseline='alphabetic';ctx.lineWidth=1;
-}}
+}
+}
 function drawModules(){for(const m of pluginModules.values()){
 const y=b2y(m.Beat||0);if(y<-60||y>H+60)continue;
 const x=x2px(clamp(m.X||0,0,255));
@@ -250,24 +248,16 @@ ctx.strokeStyle='rgba(255,255,255,.28)';ctx.beginPath();
 for(let b=Math.ceil(v0);b<=Math.floor(v1);b++){const y=Math.round(b2y(b))+.5;ctx.moveTo(trackL,y);ctx.lineTo(trackL+trackW,y);}ctx.stroke();
 ctx.fillStyle='rgba(255,255,255,.5)';ctx.font='10px monospace';
 for(let b=Math.ceil(v0);b<=Math.floor(v1);b++)if(ppb>13||b%4===0)ctx.fillText(b,barW+2,b2y(b)+3);}
-
-/* ===== 修正: segPts で x のフォールバックを強化 ===== */
-function segPts(n,b0){
-    const nx = (typeof n.x === 'number') ? n.x : 0;
-    const p=[{px:x2px(nx),py:b2y(b0)}];
-    if(n.seg)for(const s of n.seg){
-        const sx = (typeof s.x === 'number') ? s.x : 0; // ここでundefinedを0に補完
-        p.push({px:x2px(nx+sx),py:b2y(b0+b2f(s.beat))});
-    }
-    return p;
-}
-
+function segPts(n,b0){const p=[{px:x2px(n.x),py:b2y(b0)}];
+if(n.seg)for(const s of n.seg)p.push({px:x2px(n.x+(s.x||0)),py:b2y(b0+b2f(s.beat))});return p;}
 function drawRibbon(n,pts){const m=pts.length;if(m<2)return;
 const hw=(n.w||57)/255*trackW/2;
+// 全segを1パスにまとめて1回だけfill：密集/折り返しsegでfill呼出が激減し、
+// 同一fill内ではαが蓄積しないため折り返し重なり部の色ムラも出ない
 ctx.fillStyle='rgba(235,242,250,.35)';
 ctx.beginPath();
 for(let p=0;p<m-1;p++){const a=pts[p],b=pts[p+1];
-if((a.py<-40&&b.py<-40)||(a.py>H+40&&b.py>H+40))continue;
+if((a.py<-40&&b.py<-40)||(a.py>H+40&&b.py>H+40))continue;   // 画面外culling
 ctx.moveTo(a.px-hw,a.py);ctx.lineTo(a.px+hw,a.py);
 ctx.lineTo(b.px+hw,b.py);ctx.lineTo(b.px-hw,b.py);
 ctx.closePath();}
@@ -277,12 +267,13 @@ const hw=(n.w||57)/255*trackW/2;
 ctx.beginPath();
 for(let p=0;p<m-1;p++){
 ctx.moveTo(pts[p].px-hw,pts[p].py);ctx.lineTo(pts[p].px+hw,pts[p].py);
-ctx.lineTo(pts[p+1].px+hw,pts[p+1].py);ctx.lineTo(pts[p+1].px-hw,pts[p+1].py);
+ctx.lineTo(pts[p+1].px+hw,pts[p].py);ctx.lineTo(pts[p+1].px-hw,pts[p+1].py);
 ctx.closePath();}
 ctx.stroke();}
 function drawDots(pts){ctx.strokeStyle='#fff';ctx.lineWidth=2;
 ctx.fillStyle='rgba(150,205,245,.95)';
 for(let p=1;p<pts.length;p++){
+// 密集segでは前点と2px未満しか離れていない中間点を描き飛ばす（終点は必ず描く）
 if(p<pts.length-1&&Math.abs(pts[p].py-pts[p-1].py)<2&&Math.abs(pts[p].px-pts[p-1].px)<2)continue;
 ctx.beginPath();
 ctx.arc(pts[p].px,pts[p].py,4.5,0,7);ctx.fill();ctx.stroke();}
@@ -307,8 +298,7 @@ function drawBox(){if(!boxS||boxS.x1==null)return;ctx.strokeStyle='#ff0';ctx.str
 Math.min(boxS.x,boxS.x1),Math.min(boxS.y,boxS.y1),Math.abs(boxS.x-boxS.x1),Math.abs(boxS.y-boxS.y1));}
 function drawPlayline(){const b=playing?viewBeat:curBeat,y=b2y(b);
 ctx.strokeStyle='#f44';ctx.beginPath();ctx.moveTo(0,y+.5|0);ctx.lineTo(W,y+.5|0);ctx.stroke();}
-
-/* ===== hitNote ===== */
+/* ===== hitNoteも厳密culling ===== */
 function hitNote(px,py){if(!data)return null;
 const v0=y2b(H),hi=upperBound(y2b(0));
 for(let k=hi-1;k>=0;k--){const i=order[k];if(nmax[i]<v0)continue;
@@ -319,8 +309,13 @@ if(Math.abs(px-pts[p].px)<12&&Math.abs(py-pts[p].py)<12)return{i,seg:p-1};}
 const y=b2y(b0),hw=(n.w||57)/255*trackW/2+6;
 if(Math.abs(py-y)<9&&Math.abs(px-x2px(n.x))<hw+4)return{i};}
 return null;}
-
-function pointInQuad(px,py,q){
+/* ===== 「順番に選択」用ヒット判定 =====
+始点bar / seg点 / リボン多角形の内側 いずれに触れてもヒット。segを持つノートのみを対象。 */
+function pointInQuad(px,py,q){ // 4点の凸台形（水平辺）内部判定
+const yMin=Math.min(q[0].py,q[3].py),yMax=Math.max(q[1].py,q[2].py);
+if(py<Math.min(yMin,yMax)-.5||py>Math.max(yMin,yMax)+.5)return false;
+// q[0]-q[3]が上辺(px-hw / px+hw @上y), q[1]-q[2]が下辺 の想定で作るがここは矩形/台形として判定
+// 汎用に多角形内包判定（レイキャスト）を使う
 let inside=false;
 for(let i=0,j=q.length-1;i<q.length;j=i++){
 const xi=q[i].px,yi=q[i].py,xj=q[j].px,yj=q[j].py;
@@ -334,11 +329,14 @@ const v0=y2b(H),hi=upperBound(y2b(0));
 for(let k=hi-1;k>=0;k--){const i=order[k];if(nmax[i]<v0)continue;
 const n=notes[i];if(!n||n.sound||!n.seg)continue;
 const b0=b2f(n.beat);
+// 1) 始点bar
 const y=b2y(b0),hw=(n.w||57)/255*trackW/2+6;
 if(Math.abs(py-y)<12&&Math.abs(px-x2px(n.x))<hw+4)return i;
+// 2) seg点
 const pts=segPts(n,b0);
 for(let p=pts.length-1;p>=1;p--)
 if(Math.abs(px-pts[p].px)<14&&Math.abs(py-pts[p].py)<14)return i;
+// 3) リボン多角形（各セグメント区間の四角）内部
 const rhw=(n.w||57)/255*trackW/2;
 for(let p=0;p<pts.length-1;p++){
 const quad=[
@@ -352,15 +350,14 @@ if(pointInQuad(px,py,quad))return i;
 }
 return -1;
 }
-
 /* ========== 編集操作 ========== */
 function deleteSel(){if(!sel.size)return;pushUndo();
 const idxs=[...sel].map(idxOf).filter(i=>i>=0).sort((x,y)=>y-x);
 for(const i of idxs)notes.splice(i,1);
 sel.clear();rebuildIndex();req();}
-
+/* ===== ポインタ：移動専用/範囲=編集+追加選択/ナビバー ===== */
 let pointers=new Map(),pinchS=null,panS=null,dragS=null,segS=null,boxS=null,navS=null,downI=null,togPend=null;
-let pClickX=0,pClickBeat=0;
+let pClickX=0,pClickBeat=0;   // インタラクティブ型プラグイン用：直近のクリック位置
 const pos=e=>{const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
 const navTo=p=>{viewBeat=clamp((H-p.y)/H*totalBeats,-2,totalBeats+2);req();};
 cv.addEventListener('contextmenu',e=>e.preventDefault());
@@ -370,17 +367,17 @@ if(pointers.size===2){const ps=[...pointers.values()];
 pinchS={d:dist(ps[0],ps[1]),ppb,my:(ps[0].y+ps[1].y)/2,vb:viewBeat};
 dragS=segS=panS=boxS=navS=null;return;}
 downI={p,moved:false};
-if(p.x<barW){navS=1;navTo(p);return;}
+if(p.x<barW){navS=1;navTo(p);return;}                 // ナビバー＝ツール非依存
 if(tool==='plugin'){pClickX=px2x(p.x);pClickBeat=y2b(p.y);
 if(activeL)callLua(activeL,'OnDragStart');return;}
-if(tool==='chain'){panS={p,vb:viewBeat};return;}
-if(tool==='move'){panS={p,vb:viewBeat};return;}
+if(tool==='chain'){panS={p,vb:viewBeat};return;}      // 順番選択：ドラッグはスクロール、タップはup時に判定
+if(tool==='move'){panS={p,vb:viewBeat};return;}       // 移動：全てスクロール専用
 if(tool==='box'){const h=hitNote(p.x,p.y);
-if(h&&h.seg!=null){segS={i:h.i,p:h.seg,pushed:false};return;}
+if(h&&h.seg!=null){segS={i:h.i,p:h.seg,pushed:false};return;}     // 白丸ドラッグ
 if(h){const nid=nidOf(notes[h.i]);const was=sel.has(nid);if(!was)sel.add(nid);
-togPend={nid,was};
+togPend={nid,was};                                   // 動かさなければトグル
 dragS={p,origins:[...sel].map(idxOf).filter(i=>i>=0).map(i=>({i,b:b2f(notes[i].beat),x:notes[i].x})),pushed:false};return;}
-boxS={x:p.x,y:p.y};return;}
+boxS={x:p.x,y:p.y};return;}                          // 範囲は追加方式
 });
 cv.addEventListener('pointermove',e=>{const p=pos(e);
 if(pointers.has(e.pointerId))pointers.set(e.pointerId,p);
@@ -394,14 +391,14 @@ if(tool==='plugin'){pClickX=px2x(p.x);pClickBeat=y2b(p.y);
 if(activeL)callLua(activeL,'OnDragMove');return;}
 if(boxS){boxS.x1=p.x;boxS.y1=p.y;req();return;}
 if(segS){if(!segS.pushed){pushUndo();segS.pushed=true;}const n=notes[segS.i],s=n.seg[segS.p];
-s.x=Math.round(px2x(p.x)-(n.x||0));
+s.x=Math.round(px2x(p.x)-n.x);
 const num=Math.round((y2b(p.y)-b2f(n.beat))*snapDen);
 s.beat=[Math.floor(num/snapDen),mod(num,snapDen),snapDen];req();return;}
 if(dragS&&downI.moved){if(!dragS.pushed){pushUndo();dragS.pushed=true;}
 const dB=Math.round((dragS.p.y-p.y)/ppb*snapDen)/snapDen;
 const dx=Math.round((p.x-dragS.p.x)*255/trackW);
 for(const o of dragS.origins){notes[o.i].beat=fracBeat(o.b+dB,snapDen);
-notes[o.i].x=clamp((o.x||0)+dx,0,255);}req();return;}
+notes[o.i].x=clamp(o.x+dx,0,255);}req();return;}
 if(panS){viewBeat=panS.vb+(p.y-panS.p.y)/ppb;req();}});
 function up(e){pointers.delete(e.pointerId);if(pointers.size<2)pinchS=null;
 const p=pos(e);
@@ -418,40 +415,25 @@ else{toast('既に選択済みです');}
 }
 panS=null;downI=null;req();return;
 }
-if(boxS&&(boxS.x1!=null)){
+if(boxS&&(boxS.x1!=null)){                            // 範囲＝追加、解除しない
 const x0=Math.min(boxS.x,boxS.x1),x1=Math.max(boxS.x,boxS.x1);
 const bT=y2b(Math.min(boxS.y,boxS.y1)),bB=y2b(Math.max(boxS.y,boxS.y1));
 for(let i=0;i<notes.length;i++){const n=notes[i];if(!n||n.sound)continue;
 const b=b2f(n.beat);if(b<bB||b>bT)continue;
 const px=x2px(n.x);if(px>=x0&&px<=x1)sel.add(nidOf(n));}
 boxS=null;req();downI=null;return;}
-if(downI&&!downI.moved&&togPend&&togPend.was)sel.delete(togPend.nid);
+if(downI&&!downI.moved&&togPend&&togPend.was)sel.delete(togPend.nid); // タップ=トグル
 togPend=null;
 dragS=segS=panS=null;downI=null;req();}
 cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
 cv.addEventListener('wheel',e=>{e.preventDefault();
 if(e.ctrlKey)ppb=clamp(ppb*Math.exp(-e.deltaY*0.01),6,500);
 else viewBeat+=e.deltaY*0.02;req();},{passive:false});
-
 /* ========== ファイルIO ========== */
 $('#fMc').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
 baseName=f.name.replace(/\.[^.]+$/,'');
 const r=new FileReader();r.onload=()=>{
 data=JSON.parse(r.result);notes=data.note||(data.note=[]);
-
-/* === 修正: データの正規化 (Malody本家エディタのx省略対策) === */
-for(const n of notes){
-    if(!n) continue;
-    if(typeof n.x !== 'number') n.x = 0;
-    if(typeof n.w !== 'number') n.w = 57;
-    if(n.seg){
-        for(const s of n.seg){
-            if(typeof s.x !== 'number') s.x = 0; // xキー省略時に0を補完
-        }
-    }
-}
-/* ============================================================ */
-
 const snd=notes.find(n=>n&&n.sound);if(snd&&snd.offset!=null){offsetMs=snd.offset;$('#oV').value=offsetMs;}
 undoStack.length=0;redoStack.length=0;
 rebuildBpm();rebuildIndex();sel.clear();chainOrder.length=0;chainOrderSet.clear();
@@ -469,7 +451,6 @@ setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(a.href);},5000)
 $('#bSave').onclick=()=>{if(!data){alert('先にMCファイルを読み込んでください');return;}
 const blob=new Blob([JSON.stringify(data)],{type:'application/octet-stream'});
 downloadBlob(blob,baseName+'.mc');};
-
 /* ========== UI配線 ========== */
 $('#bPlay').onclick=()=>{playing?pause():play();};
 $('#bStop').onclick=stopPlay;
@@ -478,8 +459,7 @@ $('#zIn').onclick=()=>{ppb=clamp(ppb*1.25,6,500);req();};
 $('#zOut').onclick=()=>{ppb=clamp(ppb/1.25,6,500);req();};
 $('#bDelSel').onclick=deleteSel;
 $('#bClear').onclick=()=>{sel.clear();req();};
-
-/* ===== 結合ロジック (修正なし、正規化済みデータ前提で動作) ===== */
+/* ===== 「折り返し敷」= 選択順どおりにスライドを結合（index.htmlのロジック移植） ===== */
 function beatToPointArr(beat){if(!beat||beat.length!==3)return 0;if(beat[2]===0)return beat[0];return beat[0]+(beat[1]/beat[2]);}
 function _gcd(a,b){a=Math.abs(a);b=Math.abs(b);return b?_gcd(b,a%b):(a||1);}
 function beatDiffArr(b1,b2){if(!b1)return[0,0,0];if(!b2)return[...b1];
@@ -518,6 +498,7 @@ $('#bChainClr').onclick=()=>{clearChain();toast('順番選択をリセットし�
 $('#bJoin').onclick=()=>{
 if(!data){alert('先にMCファイルを読み込んでください');return;}
 if(chainOrder.length<1){toast('「順番に選択」でスライドを選んでください');return;}
+// 選択順どおりにスライド実体を集める
 const targetSlides=[];
 for(const nid of chainOrder){const i=idxOf(nid);if(i<0)continue;
 const n=notes[i];if(!n||n.sound||!n.seg)continue;targetSlides.push(n);}
@@ -544,7 +525,7 @@ for(let j=0;j<segs.length;j++){
 let segItem=JSON.parse(JSON.stringify(segs[j]));
 segItem.beat=beatAddArr(segItem.beat,baseBeat);
 segItem.beat=addOffsetToBeatArr(segItem.beat,i);
-if(typeof segItem.x==='number')segItem.x=segItem.x+offsetX;
+segItem.x=((typeof segItem.x==='number')?segItem.x:0)+offsetX;
 newSeg.push(segItem);
 }
 }else{
@@ -552,7 +533,7 @@ for(let j=segs.length-1;j>=0;j--){
 let segItem=JSON.parse(JSON.stringify(segs[j]));
 segItem.beat=beatAddArr(segItem.beat,baseBeat);
 segItem.beat=addOffsetToBeatArr(segItem.beat,i);
-if(typeof segItem.x==='number')segItem.x=segItem.x+offsetX;
+segItem.x=((typeof segItem.x==='number')?segItem.x:0)+offsetX;
 newSeg.push(segItem);
 }
 let zero={beat:[...baseBeat],x:offsetX};
@@ -562,6 +543,7 @@ newSeg.push(zero);
 }
 const fixCount=fixDuplicateSegsArr(newSeg);
 mainSlide.seg=newSeg;
+// メイン以外を削除
 const removeSet=new Set(targetSlides.slice(1));
 data.note=notes=notes.filter(n=>!removeSet.has(n));
 clearChain();sel.clear();rebuildIndex();req();
@@ -570,7 +552,7 @@ const msg=targetSlides.length===1
 :(targetSlides.length+'個を結合しました'+(fixCount>0?'（重複 '+fixCount+' 箇所自動修復）':''));
 toast('✅ '+msg);
 };
-
+/* ===== 幹スライドの相対Xを任意pointで補間取得（segmismatch移植） ===== */
 function getRelXAtArr(mainPoints,targetPoint){
 if(mainPoints.length===1)return mainPoints[0].relX;
 if(targetPoint<=mainPoints[0].point)return mainPoints[0].relX;
@@ -581,7 +563,7 @@ if(Math.abs(p2.point-p1.point)<1e-10)return p2.relX;
 const t=(targetPoint-p1.point)/(p2.point-p1.point);
 return p1.relX+(p2.relX-p1.relX)*t;}}
 return mainPoints[mainPoints.length-1].relX;}
-
+/* ===== 「枝分かれ敷」= 1本目を本体幹・残りを枝装飾として一筆書き結合（segmismatch移植） ===== */
 $('#bBranch').onclick=()=>{
 if(!data){alert('先にMCファイルを読み込んでください');return;}
 if(chainOrder.length<2){toast('「順番に選択」で本体→装飾の順に2本以上選んでください');return;}
@@ -590,13 +572,16 @@ for(const nid of chainOrder){const i=idxOf(nid);if(i<0)continue;
 const n=notes[i];if(!n||n.sound||!n.seg)continue;targetSlides.push(n);}
 if(targetSlides.length<2){toast('有効なスライドが2本未満です');return;}
 pushUndo();
+// 選択順の1本目が本体。幹は「始点が一番早い」ものとするため、
+// 始点が最も早いスライドを幹として採用（同一なら選択1本目）
 targetSlides.sort((a,b)=>{
 const d=b2f(a.beat)-b2f(b.beat);
-return Math.abs(d)>1e-10?d:0;
+return Math.abs(d)>1e-10?d:0;                 // 同beatなら元の選択順を維持
 });
 const mainSlide=targetSlides[0];
 const mainBeat=mainSlide.beat;
 const mainX=(typeof mainSlide.x==='number')?mainSlide.x:0;
+// 幹seg：折り返し（point逆行）以前の有効部分だけを切り出す
 const mainOriginalSegs=mainSlide.seg||[];
 const effectiveMainSegs=[];
 {let prev=0;
@@ -605,7 +590,7 @@ const p=beatToPointArr(mainOriginalSegs[i].beat);
 if(p<prev-1e-10)break;
 effectiveMainSegs.push(mainOriginalSegs[i]);prev=p;}}
 const mainPoints=[{point:0,relX:0}];
-for(const s of effectiveMainSegs)mainPoints.push({point:beatToPointArr(s.beat),relX:(typeof s.x==='number')?s.x:0});
+for(const s of effectiveMainSegs)mainPoints.push({point:beatToPointArr(s.beat),relX:(s.x||0)});
 const branches=targetSlides.slice(1);
 const events=[];
 let mainLastSeg=null,mainLastPoint=0;
@@ -613,7 +598,7 @@ if(effectiveMainSegs.length>0){
 mainLastSeg=effectiveMainSegs[effectiveMainSegs.length-1];
 mainLastPoint=beatToPointArr(mainLastSeg.beat);
 for(let i=0;i<effectiveMainSegs.length-1;i++){const s=effectiveMainSegs[i];
-events.push({type:'main_seg',point:beatToPointArr(s.beat),beat:s.beat,x:(typeof s.x==='number')?s.x:0});}}
+events.push({type:'main_seg',point:beatToPointArr(s.beat),beat:s.beat,x:(s.x||0)});}}
 for(const branch of branches){
 const branchSegs=branch.seg||[];
 const branchX=(typeof branch.x==='number')?branch.x:0;
@@ -625,10 +610,11 @@ const endRelPoint=beatToPointArr(endRelBeat);
 const trunkRelX=Math.floor(getRelXAtArr(mainPoints,endRelPoint));
 events.push({type:'branch_insert',point:endRelPoint,beat:endRelBeat,x:trunkRelX,
 branchSegs,offsetX,offsetBeat});}
+// point昇順、同点ならmain_segを先に
 events.sort((a,b)=>{const d=a.point-b.point;
 if(Math.abs(d)>1e-10)return d;
 if(a.type==='main_seg'&&b.type==='branch_insert')return -1;
-if(a.type==='branch_insert'&&a.type==='main_seg')return 1;
+if(a.type==='branch_insert'&&b.type==='main_seg')return 1;
 return 0;});
 const newSeg=[];
 let currentAbsPoint=0;
@@ -637,21 +623,26 @@ if(ev.type==='main_seg'){
 newSeg.push({beat:[...ev.beat],x:ev.x});
 currentAbsPoint=ev.point;
 }else{
+// 枝の終点(幹上)まで移動 → 枝を逆行でたどる → 枝の始点へ → 枝を順行でたどる → 幹上へ戻る
 newSeg.push({beat:[...ev.beat],x:ev.x});
 for(let j=ev.branchSegs.length-1;j>=0;j--){const s=ev.branchSegs[j];
-newSeg.push({beat:beatAddArr(ev.offsetBeat,s.beat),x:ev.offsetX+((typeof s.x==='number')?s.x:0)});}
+newSeg.push({beat:beatAddArr(ev.offsetBeat,s.beat),x:ev.offsetX+(s.x||0)});}
 newSeg.push({beat:[...ev.offsetBeat],x:ev.offsetX});
 for(let j=0;j<ev.branchSegs.length;j++){const s=ev.branchSegs[j];
-newSeg.push({beat:beatAddArr(ev.offsetBeat,s.beat),x:ev.offsetX+((typeof s.x==='number')?s.x:0)});}
+newSeg.push({beat:beatAddArr(ev.offsetBeat,s.beat),x:ev.offsetX+(s.x||0)});}
 newSeg.push({beat:[...ev.beat],x:ev.x});
 currentAbsPoint=ev.point;}}
+// 装飾が幹終点より未来にある場合：幹を逆行して戻す
 if(mainLastSeg&&currentAbsPoint>mainLastPoint){
 for(let i=events.length-1;i>=0;i--){const ev=events[i];
 if(ev.type==='main_seg'&&ev.point<=currentAbsPoint&&ev.point>mainLastPoint)
 newSeg.push({beat:[...ev.beat],x:ev.x});}}
-if(mainLastSeg)newSeg.push({beat:[...mainLastSeg.beat],x:(typeof mainLastSeg.x==='number')?mainLastSeg.x:0});
+// 最後に幹の終点で蓋
+if(mainLastSeg)newSeg.push({beat:[...mainLastSeg.beat],x:mainLastSeg.x});
+// 元の折り返し部分（有効範囲外）をそのまま末尾へ
 for(let i=effectiveMainSegs.length;i<mainOriginalSegs.length;i++)
-newSeg.push({beat:[...mainOriginalSegs[i].beat],x:(typeof mainOriginalSegs[i].x==='number')?mainOriginalSegs[i].x:0});
+newSeg.push({beat:[...mainOriginalSegs[i].beat],x:mainOriginalSegs[i].x});
+// [m,0,0] 形式（分母0）を [m,0,1] に正規化しておくと描画/保存が安定
 for(const s of newSeg)if(!s.beat[2])s.beat[2]=1;
 const fixCount=fixDuplicateSegsArr(newSeg);
 mainSlide.seg=newSeg;
@@ -660,7 +651,6 @@ data.note=notes=notes.filter(n=>!removeSet.has(n));
 clearChain();sel.clear();rebuildIndex();req();
 toast('✅ 枝分かれ結合: '+targetSlides.length+'本を処理'+(fixCount>0?'（重複 '+fixCount+' 箇所自動修復）':''));
 };
-
 $('#oV').onchange=e=>{offsetMs=+e.target.value||0;};
 for(const b of document.querySelectorAll('[data-t]'))b.onclick=()=>{
 if(tool==='plugin'&&activeL){callLua(activeL,'OnDeactive');activeL=null;}
@@ -669,18 +659,17 @@ document.querySelectorAll('[data-t]').forEach(x=>{
 x.classList.toggle('on',x===b&&x.dataset.t!=='chain');
 x.classList.toggle('chainOn',x===b&&x.dataset.t==='chain');
 });
+if(tool!=='chain'&&chainOrder.length){/* chainツールを離れても選択順は保持 */}
 req();
 };
 for(const d of[1,2,3,4,6,8,12,16,24,48,96,288]){const o=document.createElement('option');
 o.value=d;o.textContent='1/'+d;if(d===4)o.selected=true;$('#sSnap').appendChild(o);}
 $('#sSnap').onchange=e=>snapDen=+e.target.value;
-
 /* ========== 将来プラグイン用API ========== */
 window.SlideEditor={get data(){return data},get notes(){return notes},get selection(){return sel},
 rebuild:()=>{rebuildIndex();req()},req,deleteSel,
 b2f,fracBeat,beatToSec,secToBeat};
-
-/* ========== プラグインAPI ========== */
+/* ========== プラグインAPI (MalodyV PluginAPI互換 / Editorテーブル) ========== */
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('on');
 clearTimeout(toast._h);toast._h=setTimeout(()=>t.classList.remove('on'),2200);}
 function gcd(a,b){a=Math.abs(a);b=Math.abs(b);return b?gcd(b,a%b):(a||1);}
@@ -719,7 +708,7 @@ GetNoteSlideBodyCount:(nid)=>((requireNote(nid).n.seg)||[]).length,
 GetNoteSlideBodyBeat:(nid,index)=>{const seg=requireNote(nid).n.seg;
 if(!seg||!seg[index])throw new Error('segのindexが範囲外です');return arrToBeatObj(seg[index].beat);},
 GetNoteSlideBodyX:(nid,index)=>{const seg=requireNote(nid).n.seg;
-if(!seg||!seg[index])throw new Error('segのindexが範囲外です');return seg[index].x||0;},
+if(!seg||!seg[index])throw new Error('segのindexが範囲外です');return (typeof seg[index].x==='number')?seg[index].x:0;},
 GetClickX:()=>pClickX,
 GetClickBeat:()=>arrToBeatObj(fracBeat(pClickBeat,snapDen)),
 GetClickBeatFree:()=>arrToBeatObj(makeFracBeat(pClickBeat,2880)),
@@ -802,7 +791,6 @@ api.AddTextUndo=(id,text)=>api.AddText(id,text);
 api.RemoveSpriteUndo=(id)=>api.RemoveModule(id);
 return api;
 }
-
 /* ===== Lua実行(Fengari) ===== */
 let activeL=null;
 function callLua(L,name,...args){const{lua,interop}=fengari;
@@ -831,7 +819,6 @@ callLua(L,'Run');
 }
 }catch(err){alert('プラグイン実行エラー:\n'+err.message);}
 }
-
 /* ===== プラグイン管理UI ===== */
 let plugins=[];
 function extractHeader(code){
