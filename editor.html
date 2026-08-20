@@ -213,8 +213,9 @@ ctx.fillStyle=col;
 ctx.beginPath();                                  // 1パスに集約して1回fill
 for(let p=0;p<pts.length-1;p++){const a=pts[p],b=pts[p+1];
 if((a.py<-40&&b.py<-40)||(a.py>H+40&&b.py>H+40))continue;
-ctx.moveTo(a.px-hw,a.py);ctx.lineTo(a.px+hw,a.py);
-ctx.lineTo(b.px+hw,b.py);ctx.lineTo(b.px-hw,b.py);
+const t=(a.py<=b.py)?a:b,u=(a.py<=b.py)?b:a;      // 逆行segでも巻き順を一定に（穴防止）
+ctx.moveTo(t.px-hw,t.py);ctx.lineTo(t.px+hw,t.py);
+ctx.lineTo(u.px+hw,u.py);ctx.lineTo(u.px-hw,u.py);
 ctx.closePath();}
 ctx.fill();
 // 始点bar強調
@@ -254,12 +255,16 @@ function drawRibbon(n,pts){const m=pts.length;if(m<2)return;
 const hw=(n.w||57)/255*trackW/2;
 // 全segを1パスにまとめて1回だけfill：密集/折り返しsegでfill呼出が激減し、
 // 同一fill内ではαが蓄積しないため折り返し重なり部の色ムラも出ない
+// ※segは時系列順とは限らない（往復/逆行の一筆書き順で描く）。そのため各四角は
+// 必ず「上辺→下辺」の一定巻き順で積む。巻き順が混在するとnonzero fillの
+// 巻き数が打消し合い、往復の重なり部分に穴が開いて消えてしまう。
 ctx.fillStyle='rgba(235,242,250,.35)';
 ctx.beginPath();
 for(let p=0;p<m-1;p++){const a=pts[p],b=pts[p+1];
 if((a.py<-40&&b.py<-40)||(a.py>H+40&&b.py>H+40))continue;   // 画面外culling
-ctx.moveTo(a.px-hw,a.py);ctx.lineTo(a.px+hw,a.py);
-ctx.lineTo(b.px+hw,b.py);ctx.lineTo(b.px-hw,b.py);
+const t=(a.py<=b.py)?a:b,u=(a.py<=b.py)?b:a;                // t=上の点 u=下の点
+ctx.moveTo(t.px-hw,t.py);ctx.lineTo(t.px+hw,t.py);
+ctx.lineTo(u.px+hw,u.py);ctx.lineTo(u.px-hw,u.py);
 ctx.closePath();}
 ctx.fill();}
 function drawRibbonStroke(n,b0){const pts=segPts(n,b0),m=pts.length;if(m<2)return;
@@ -267,7 +272,7 @@ const hw=(n.w||57)/255*trackW/2;
 ctx.beginPath();
 for(let p=0;p<m-1;p++){
 ctx.moveTo(pts[p].px-hw,pts[p].py);ctx.lineTo(pts[p].px+hw,pts[p].py);
-ctx.lineTo(pts[p+1].px+hw,pts[p].py);ctx.lineTo(pts[p+1].px-hw,pts[p+1].py);
+ctx.lineTo(pts[p+1].px+hw,pts[p+1].py);ctx.lineTo(pts[p+1].px-hw,pts[p+1].py);
 ctx.closePath();}
 ctx.stroke();}
 function drawDots(pts){ctx.strokeStyle='#fff';ctx.lineWidth=2;
