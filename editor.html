@@ -51,10 +51,11 @@ input[type=number]{width:64px;background:#2c2c3d;color:#ddd;border:1px solid #44
  <span class="sp"></span>
  <button data-t="move" class="on">移動</button><button data-t="box">範囲</button><button data-t="chain" title="スライドを結合する順にタップで選択">順番に選択</button>
  <button id="bDelSel">選択削除</button><button id="bClear">選択解除</button>
- <select id="sJoinMode" class="mode" title="結合モード"><option value="keep">間隔を保つ</option><option value="pack">間隔を詰める</option></select>
+
  <button id="bJoin" class="join" title="選択した順番でスライドを1つに結合">折り返し敷</button>
  <button id="bBranch" class="join" title="選択順の1本目を本体・残りを枝分かれ装飾として一筆書き結合">枝分かれ敷</button>
  <button id="bChainClr" title="順番選択をリセット">順番リセット</button>
+ <button id="bSendBack" title="選択中のスライドの当たり判定を後回しにして、重なった下のスライドをタップで選べるようにする">背面へ</button>
  <button id="bUndo">⟲</button><button id="bRedo">⟳</button>
  <span>off</span><input type="number" id="oV" step="1">
  <span class="sp"></span>
@@ -91,6 +92,7 @@ let data=null,notes=[],starts=new Float64Array(0),order=[];
 let sel=new Set(),baseName='chart';           // sel は永続ID(nid)の集合
 let chainOrder=[];                            // 「順番に選択」ツールで選択したnidの順序付き配列
 let chainOrderSet=new Set();                  // 高速参照用（chainOrderと同期）
+let backSet=new Set();                        // 「背面へ」で当たり判定を後回しにしたnidの集合（重なり選択用）
 let dirty=true,rafPend=false;
 
 /* ===== ノーツ永続ID (プラグインからの参照用) =====
@@ -107,10 +109,10 @@ const snap=()=>JSON.stringify(notes);
 function pushUndo(){undoStack.push(snap());if(undoStack.length>30)undoStack.shift();redoStack.length=0;}
 function undo(){if(!undoStack.length||!data)return;
  redoStack.push(snap());notes=JSON.parse(undoStack.pop());data.note=notes;
- sel.clear();chainOrder.length=0;chainOrderSet.clear();rebuildIndex();req();}
+ sel.clear();chainOrder.length=0;chainOrderSet.clear();backSet.clear();rebuildIndex();req();}
 function redo(){if(!redoStack.length||!data)return;
  undoStack.push(snap());notes=JSON.parse(redoStack.pop());data.note=notes;
- sel.clear();chainOrder.length=0;chainOrderSet.clear();rebuildIndex();req();}
+ sel.clear();chainOrder.length=0;chainOrderSet.clear();backSet.clear();rebuildIndex();req();}
 $('#bUndo').onclick=undo;$('#bRedo').onclick=redo;
 addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey))return;   // デスクトップ補助
  const k=e.key.toLowerCase();
@@ -323,14 +325,17 @@ function drawPlayline(){const b=playing?viewBeat:curBeat,y=b2y(b);
 /* ===== hitNoteも厳密culling ===== */
 function hitNote(px,py){if(!data)return null;
  const v0=y2b(H),hi=upperBound(y2b(0));
- for(let k=hi-1;k>=0;k--){const i=order[k];if(nmax[i]<v0)continue;
-  const n=notes[i],b0=b2f(n.beat);
-  if(n.seg){const pts=segPts(n,b0);
-   for(let p=pts.length-1;p>=1;p--)
-    if(Math.abs(px-pts[p].px)<12&&Math.abs(py-pts[p].py)<12)return{i,seg:p-1};}
-  const y=b2y(b0),hw=(n.w||57)/255*trackW/2+6;
-  if(Math.abs(py-y)<9&&Math.abs(px-x2px(n.x))<hw+4)return{i};}
- return null;}
+ const scan=(skipBack)=>{
+  for(let k=hi-1;k>=0;k--){const i=order[k];if(nmax[i]<v0)continue;
+   const n=notes[i];if(skipBack&&backSet.has(nidOf(n)))continue;
+   const b0=b2f(n.beat);
+   if(n.seg){const pts=segPts(n,b0);
+    for(let p=pts.length-1;p>=1;p--)
+     if(Math.abs(px-pts[p].px)<12&&Math.abs(py-pts[p].py)<12)return{i,seg:p-1};}
+   const y=b2y(b0),hw=(n.w||57)/255*trackW/2+6;
+   if(Math.abs(py-y)<9&&Math.abs(px-x2px(n.x))<hw+4)return{i};}
+  return null;};
+ return scan(true)||scan(false);}   // まず「背面へ」対象を除外して探し、無ければそれも含めて探す
 
 /* ===== 「順番に選択」用ヒット判定 =====
    始点bar / seg点 / リボン多角形の内側 いずれに触れてもヒット。segを持つノートのみを対象。 */
@@ -349,8 +354,12 @@ function pointInQuad(px,py,q){ // 4点の凸台形（水平辺）内部判定
 }
 function hitSlideForChain(px,py){if(!data)return -1;
  const v0=y2b(H),hi=upperBound(y2b(0));
+ const scan=(skipBack)=>{
  for(let k=hi-1;k>=0;k--){const i=order[k];if(nmax[i]<v0)continue;
   const n=notes[i];if(!n||n.sound||!n.seg)continue;
+  const nid=nidOf(n);
+  if(chainOrderSet.has(nid))continue;        // 選択済みは当たり判定を外し、重なった下のスライドを選べるようにする
+  if(skipBack&&backSet.has(nid))continue;    // 「背面へ」対象も同様にまず除外する
   const b0=b2f(n.beat);
   // 1) 始点bar
   const y=b2y(b0),hw=(n.w||57)/255*trackW/2+6;
@@ -371,7 +380,8 @@ function hitSlideForChain(px,py){if(!data)return -1;
    if(pointInQuad(px,py,quad))return i;
   }
  }
- return -1;
+ return -1;};
+ const r=scan(true);return r>=0?r:scan(false);
 }
 
 /* ========== 編集操作 ========== */
@@ -462,7 +472,7 @@ $('#fMc').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
   data=JSON.parse(r.result);notes=data.note||(data.note=[]);
   const snd=notes.find(n=>n&&n.sound);if(snd&&snd.offset!=null){offsetMs=snd.offset;$('#oV').value=offsetMs;}
   undoStack.length=0;redoStack.length=0;
-  rebuildBpm();rebuildIndex();sel.clear();chainOrder.length=0;chainOrderSet.clear();
+  rebuildBpm();rebuildIndex();sel.clear();chainOrder.length=0;chainOrderSet.clear();backSet.clear();
   const first=notes.find(n=>n&&!n.sound);viewBeat=curBeat=first?b2f(first.beat):0;req();};
  r.readAsText(f);});
 $('#fAu').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
@@ -534,8 +544,22 @@ function fixDuplicateSegsArr(segArray){let used=[],fixed=0;const MICRO=9001;
   used.push(cur);}
  return fixed;}
 
-function clearChain(){chainOrder.length=0;chainOrderSet.clear();req();}
+function clearChain(){chainOrder.length=0;chainOrderSet.clear();backSet.clear();req();}
 $('#bChainClr').onclick=()=>{clearChain();toast('順番選択をリセットしました');};
+$('#bSendBack').onclick=()=>{
+ if(sel.size){
+  for(const nid of sel)backSet.add(nid);
+  const n=sel.size;sel.clear();req();
+  toast(n+'個のスライドを背面へ送りました。同じ場所をもう一度タップすると下のスライドを選べます');
+  return;
+ }
+ if(chainOrder.length){                     // 「順番に選択」はタップ即確定なので、直前の1つを取り消して背面へ送る
+  const nid=chainOrder.pop();chainOrderSet.delete(nid);backSet.add(nid);req();
+  toast('直前に選んだスライドを取り消して背面へ送りました。同じ場所をもう一度タップすると下のスライドを選べます');
+  return;
+ }
+ toast('先にスライドを選択してください');
+};
 
 $('#bJoin').onclick=()=>{
  if(!data){alert('先にMCファイルを読み込んでください');return;}
@@ -548,7 +572,7 @@ $('#bJoin').onclick=()=>{
  if(targetSlides.length===1){toast('スライドが1個のためバグ修復のみ実行します');}
 
  pushUndo();
- const timeMode=$('#sJoinMode').value;
+ const timeMode='keep';                     // 「間隔を保つ/詰める」切替は廃止し、常に間隔を保つ動作に固定
  const mainSlide=targetSlides[0];
  const mainX=(typeof mainSlide.x==='number')?mainSlide.x:0;
  const mainBeat=mainSlide.beat;
@@ -562,7 +586,7 @@ $('#bJoin').onclick=()=>{
 
   if(i%2===0){
    if(i>0){
-    let startItem={beat:(timeMode==='pack')?[0,1,8477]:[...baseBeat],x:offsetX};
+    let startItem={beat:[...baseBeat],x:offsetX};
     startItem.beat=addOffsetToBeatArr(startItem.beat,i);
     newSeg.push(startItem);
    }
