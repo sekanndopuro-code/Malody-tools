@@ -490,30 +490,42 @@ $('#bClear').onclick=()=>{sel.clear();req();};
 /* ===== 「折り返し敷」= 選択順どおりにスライドを結合（index.htmlのロジック移植） ===== */
 function beatToPointArr(beat){if(!beat||beat.length!==3)return 0;if(beat[2]===0)return beat[0];return beat[0]+(beat[1]/beat[2]);}
 function _gcd(a,b){a=Math.abs(a);b=Math.abs(b);return b?_gcd(b,a%b):(a||1);}
+/* beat分数の分母には常に上限を設ける：この演算群は分母同士を掛け合わせて新しい分母を作るため、
+   高精度チャート（分母1048576など）を何度も演算に通すと分母が数十億〜数兆に膨れ上がり、
+   本家エディタ側の数値表現の限界を超えて壊れる（segが無関係な位置に散らばる）原因になっていた。
+   出力のたびにこの上限（本家で動作確認済みの1048576）へ丸め込み、精度は1/1048576拍のまま実質無劣化で安全にする。 */
+const MAX_BEAT_DEN=1048576;
+function capBeatDen(m,n,d){
+ if(d<=0)d=1;
+ if(d<=MAX_BEAT_DEN){if(n===0)return[m,0,0];const g=_gcd(n,d);return[m,n/g,d/g];}
+ let newNum=Math.round(n/d*MAX_BEAT_DEN);
+ if(newNum>=MAX_BEAT_DEN){m+=1;newNum=0;}
+ if(newNum===0)return[m,0,0];
+ const g=_gcd(newNum,MAX_BEAT_DEN);return[m,newNum/g,MAX_BEAT_DEN/g];}
 function beatDiffArr(b1,b2){if(!b1)return[0,0,0];if(!b2)return[...b1];
  const m1=b1[0],n1=b1[1]||0,d1=b1[2]===0?1:(b1[2]||1);
  const m2=b2[0],n2=b2[1]||0,d2=b2[2]===0?1:(b2[2]||1);
  const num1=(m1*d1+n1)*d2,num2=(m2*d2+n2)*d1,den=d1*d2;
  let diffNum=num1-num2;if(diffNum<0)diffNum=0;
  const m=Math.floor(diffNum/den),n=diffNum%den;
- if(n===0)return[m,0,0];const g=_gcd(n,den);return[m,n/g,den/g];}
+ return capBeatDen(m,n,den);}
 function beatAddArr(b1,b2){if(!b1)return[...b2];if(!b2)return[...b1];
  const m1=b1[0],n1=b1[1]||0,d1=b1[2]===0?1:(b1[2]||1);
  const m2=b2[0],n2=b2[1]||0,d2=b2[2]===0?1:(b2[2]||1);
  const num1=n1*d2,num2=n2*d1,den=d1*d2;
  let num=num1+num2,m=m1+m2+Math.floor(num/den),n=num%den;
- if(n===0)return[m,0,0];const g=_gcd(n,den);return[m,n/g,den/g];}
+ return capBeatDen(m,n,den);}
 function addOffsetToBeatArr(beat,offsetIndex){if(!beat||beat.length!==3||offsetIndex===0)return beat;
  const m=beat[0],n=beat[1]||0,d=beat[2]===0?1:(beat[2]||1),DEN=8477;
  let newNum=n*DEN+offsetIndex*d,newDen=d*DEN;
  let extraM=Math.floor(newNum/newDen),newM=m+extraM;newNum=newNum%newDen;
- if(newNum===0)return[newM,0,0];const g=_gcd(newNum,newDen);return[newM,newNum/g,newDen/g];}
+ return capBeatDen(newM,newNum,newDen);}
 function fixDuplicateSegsArr(segArray){let used=[],fixed=0;const MICRO=9001;
  function micro(beat,c){if(!beat||beat.length!==3||c===0)return beat;
   const m=beat[0],n=beat[1],d=beat[2]===0?1:beat[2];
   let newNum=n*MICRO+c*d,newDen=d*MICRO;
   let extraM=Math.floor(newNum/newDen),newM=m+extraM;newNum=newNum%newDen;
-  if(newNum===0)return[newM,0,0];const g=_gcd(newNum,newDen);return[newM,newNum/g,newDen/g];}
+  return capBeatDen(newM,newNum,newDen);}
  for(let i=0;i<segArray.length;i++){const item=segArray[i];let p=beatToPointArr(item.beat);
   let cnt=0,conflict=true,cur=p;
   while(conflict){conflict=false;
