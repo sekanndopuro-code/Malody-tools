@@ -53,7 +53,9 @@ input[type=number]{width:64px;background:#2c2c3d;color:#ddd;border:1px solid #44
  <button id="bDelSel">選択削除</button><button id="bClear">選択解除</button>
 
  <button id="bJoin" class="join" title="選択した順番でスライドを1つに結合">折り返し敷</button>
+ <button id="bJoinAuto" class="join" title="「順番に選択」で判定を残す本体を1本選び、「範囲」で装飾スライドをまとめて選択→本体の始点beat順(同beatは順不同)で自動的に折り返し結合">範囲で折り返し敷</button>
  <button id="bBranch" class="join" title="選択順の1本目を本体・残りを枝分かれ装飾として一筆書き結合">枝分かれ敷</button>
+ <button id="bBranchAuto" class="join" title="「順番に選択」で判定を残す本体を1本選び、「範囲」で装飾スライドをまとめて選択→本体の始点beat順(同beatは順不同)で自動的に枝分かれ結合">範囲で枝分かれ敷</button>
  <button id="bChainClr" title="順番選択をリセット">順番リセット</button>
  <button id="bSendBack" title="選択中のスライドの当たり判定を後回しにして、重なった下のスライドをタップで選べるようにする">背面へ</button>
  <button id="bUndo">⟲</button><button id="bRedo">⟳</button>
@@ -561,17 +563,11 @@ $('#bSendBack').onclick=()=>{
  toast('先にスライドを選択してください');
 };
 
-$('#bJoin').onclick=()=>{
- if(!data){alert('先にMCファイルを読み込んでください');return;}
- if(chainOrder.length<1){toast('「順番に選択」でスライドを選んでください');return;}
- // 選択順どおりにスライド実体を集める
- const targetSlides=[];
- for(const nid of chainOrder){const i=idxOf(nid);if(i<0)continue;
-  const n=notes[i];if(!n||n.sound||!n.seg)continue;targetSlides.push(n);}
- if(targetSlides.length<1){toast('有効なスライドがありません');return;}
- if(targetSlides.length===1){toast('スライドが1個のためバグ修復のみ実行します');}
-
- pushUndo();
+/* ===== 「折り返し敷」の中核ロジックを共通関数化。
+   $('#bJoin')（完全手動の順番指定）と $('#bJoinAuto')（本体だけ手動選択・装飾はbeat順自動）の
+   どちらからも同じロジックを呼べるようにし、既存の挙動は一切変えずに選択肢だけを増やす。
+   targetSlides[0] が本体（判定を残す）、以降は結合順どおりに行ったり来たりしながら一筆書きされる。 */
+function mergeJoinInto(targetSlides){
  const timeMode='keep';                     // 「間隔を保つ/詰める」切替は廃止し、常に間隔を保つ動作に固定
  const mainSlide=targetSlides[0];
  const mainX=(typeof mainSlide.x==='number')?mainSlide.x:0;
@@ -616,12 +612,63 @@ $('#bJoin').onclick=()=>{
  // メイン以外を削除
  const removeSet=new Set(targetSlides.slice(1));
  data.note=notes=notes.filter(n=>!removeSet.has(n));
+ return fixCount;
+}
 
+$('#bJoin').onclick=()=>{
+ if(!data){alert('先にMCファイルを読み込んでください');return;}
+ if(chainOrder.length<1){toast('「順番に選択」でスライドを選んでください');return;}
+ // 選択順どおりにスライド実体を集める
+ const targetSlides=[];
+ for(const nid of chainOrder){const i=idxOf(nid);if(i<0)continue;
+  const n=notes[i];if(!n||n.sound||!n.seg)continue;targetSlides.push(n);}
+ if(targetSlides.length<1){toast('有効なスライドがありません');return;}
+ if(targetSlides.length===1){toast('スライドが1個のためバグ修復のみ実行します');}
+
+ pushUndo();
+ const fixCount=mergeJoinInto(targetSlides);
  clearChain();sel.clear();rebuildIndex();req();
  const msg=targetSlides.length===1
   ?('バグ修復のみ実行'+(fixCount>0?'（重複 '+fixCount+' 箇所修復）':'（重複なし）'))
   :(targetSlides.length+'個を結合しました'+(fixCount>0?'（重複 '+fixCount+' 箇所自動修復）':''));
  toast('✅ '+msg);
+};
+
+/* ===== 「範囲で折り返し敷」＝ 本体(判定あり)は「順番に選択」で1本だけ手動指定し、
+   装飾は「範囲選択」でまとめて選んだ集合(sel)から、結合する順番にこだわらない前提で自動決定する。
+   折り返し敷は行ったり来たりを順番どおりに一筆書きするため挿入順が結果に直結するので、
+   装飾の始点beat昇順を結合順として採用する。beatが重複する装飾同士は結合順を気にしなくてよいため、
+   同beatグループ内だけランダムに並べ替える（Fisher-Yates）。 */
+$('#bJoinAuto').onclick=()=>{
+ if(!data){alert('先にMCファイルを読み込んでください');return;}
+ if(chainOrder.length!==1){toast('「順番に選択」で判定を残す本体スライドを1本だけ選んでください');return;}
+ const mainNid=chainOrder[0];
+ const mainI=idxOf(mainNid);
+ const mainSlide=mainI>=0?notes[mainI]:null;
+ if(!mainSlide||mainSlide.sound||!mainSlide.seg){toast('本体スライドが見つかりません');return;}
+
+ // 装飾＝範囲選択(sel)から本体自身を除いたもの
+ const decoSlides=[];
+ for(const nid of sel){if(nid===mainNid)continue;const i=idxOf(nid);if(i<0)continue;
+  const n=notes[i];if(!n||n.sound||!n.seg)continue;decoSlides.push(n);}
+ if(decoSlides.length<1){toast('「範囲選択」で装飾にするスライドをまとめて選んでください');return;}
+
+ // 始点beat昇順に整列。同beatはランダムに並べる（結合順にこだわらないため）
+ const withBeat=decoSlides.map(n=>({n,b:b2f(n.beat)}));
+ withBeat.sort((a,b)=>a.b-b.b);
+ for(let i=0;i<withBeat.length;){
+  let j=i+1;
+  while(j<withBeat.length&&Math.abs(withBeat[j].b-withBeat[i].b)<1e-9)j++;
+  for(let k=j-1;k>i;k--){const r=i+Math.floor(Math.random()*(k-i+1));
+   [withBeat[k],withBeat[r]]=[withBeat[r],withBeat[k]];}
+  i=j;
+ }
+ const targetSlides=[mainSlide,...withBeat.map(o=>o.n)];
+
+ pushUndo();
+ const fixCount=mergeJoinInto(targetSlides);
+ clearChain();sel.clear();rebuildIndex();req();
+ toast('✅ 範囲で折り返し結合: 本体+'+(targetSlides.length-1)+'本を処理'+(fixCount>0?'（重複 '+fixCount+' 箇所自動修復）':''));
 };
 
 /* ===== 幹スライドの相対Xを任意pointで補間取得（segmismatch移植） ===== */
@@ -636,23 +683,11 @@ function getRelXAtArr(mainPoints,targetPoint){
    return p1.relX+(p2.relX-p1.relX)*t;}}
  return mainPoints[mainPoints.length-1].relX;}
 
-/* ===== 「枝分かれ敷」= 1本目を本体幹・残りを枝装飾として一筆書き結合（segmismatch移植） ===== */
-$('#bBranch').onclick=()=>{
- if(!data){alert('先にMCファイルを読み込んでください');return;}
- if(chainOrder.length<2){toast('「順番に選択」で本体→装飾の順に2本以上選んでください');return;}
- const targetSlides=[];
- for(const nid of chainOrder){const i=idxOf(nid);if(i<0)continue;
-  const n=notes[i];if(!n||n.sound||!n.seg)continue;targetSlides.push(n);}
- if(targetSlides.length<2){toast('有効なスライドが2本未満です');return;}
-
- pushUndo();
- // 選択順の1本目が本体。幹は「始点が一番早い」ものとするため、
- // 始点が最も早いスライドを幹として採用（同一なら選択1本目）
- targetSlides.sort((a,b)=>{
-  const d=b2f(a.beat)-b2f(b.beat);
-  return Math.abs(d)>1e-10?d:0;                 // 同beatなら元の選択順を維持
- });
- const mainSlide=targetSlides[0];
+/* ===== 「枝分かれ敷」= 1本目を本体幹・残りを枝装飾として一筆書き結合（segmismatch移植） =====
+   本体1本+装飾N本を結合する中核ロジックを共通関数化。
+   $('#bBranch')（完全手動の順番指定）と $('#bBranchAuto')（本体だけ手動選択・装飾はbeat順自動）の
+   どちらからも同じロジックを呼べるようにし、既存の挙動は一切変えずに選択肢だけを増やす。 */
+function mergeBranchesInto(mainSlide,branches){
  const mainBeat=mainSlide.beat;
  const mainX=(typeof mainSlide.x==='number')?mainSlide.x:0;
 
@@ -668,7 +703,6 @@ $('#bBranch').onclick=()=>{
  const mainPoints=[{point:0,relX:0}];
  for(const s of effectiveMainSegs)mainPoints.push({point:beatToPointArr(s.beat),relX:s.x||0});
 
- const branches=targetSlides.slice(1);
  const events=[];
  let mainLastSeg=null,mainLastPoint=0;
  if(effectiveMainSegs.length>0){
@@ -730,8 +764,67 @@ $('#bBranch').onclick=()=>{
  mainSlide.seg=newSeg;
  const removeSet=new Set(branches);
  data.note=notes=notes.filter(n=>!removeSet.has(n));
+ return fixCount;
+}
+
+$('#bBranch').onclick=()=>{
+ if(!data){alert('先にMCファイルを読み込んでください');return;}
+ if(chainOrder.length<2){toast('「順番に選択」で本体→装飾の順に2本以上選んでください');return;}
+ const targetSlides=[];
+ for(const nid of chainOrder){const i=idxOf(nid);if(i<0)continue;
+  const n=notes[i];if(!n||n.sound||!n.seg)continue;targetSlides.push(n);}
+ if(targetSlides.length<2){toast('有効なスライドが2本未満です');return;}
+
+ pushUndo();
+ // 選択順の1本目が本体。幹は「始点が一番早い」ものとするため、
+ // 始点が最も早いスライドを幹として採用（同一なら選択1本目）
+ targetSlides.sort((a,b)=>{
+  const d=b2f(a.beat)-b2f(b.beat);
+  return Math.abs(d)>1e-10?d:0;                 // 同beatなら元の選択順を維持
+ });
+ const mainSlide=targetSlides[0];
+ const branches=targetSlides.slice(1);
+ const fixCount=mergeBranchesInto(mainSlide,branches);
  clearChain();sel.clear();rebuildIndex();req();
  toast('✅ 枝分かれ結合: '+targetSlides.length+'本を処理'+(fixCount>0?'（重複 '+fixCount+' 箇所自動修復）':''));
+};
+
+/* ===== 「範囲で枝分かれ敷」＝ 本体(判定あり)は「順番に選択」で1本だけ手動指定し、
+   装飾は「範囲選択」でまとめて選んだ集合(sel)から、結合する順番にこだわらない前提で自動決定する。
+   自動順は装飾の始点beatの昇順。beatが重複する装飾同士は結合順を気にしなくてよいため、
+   同beatグループ内だけランダムに並べ替える（Fisher-Yates）。
+   ※ mergeBranchesInto側で装飾の挿入位置は結局「本体パス上のどこに刺さるか」で再計算されるため、
+     ここでの並び順は主に処理の決定性のためのものであり、既存の「枝分かれ敷」の結果と矛盾しない。 */
+$('#bBranchAuto').onclick=()=>{
+ if(!data){alert('先にMCファイルを読み込んでください');return;}
+ if(chainOrder.length!==1){toast('「順番に選択」で判定を残す本体スライドを1本だけ選んでください');return;}
+ const mainNid=chainOrder[0];
+ const mainI=idxOf(mainNid);
+ const mainSlide=mainI>=0?notes[mainI]:null;
+ if(!mainSlide||mainSlide.sound||!mainSlide.seg){toast('本体スライドが見つかりません');return;}
+
+ // 装飾＝範囲選択(sel)から本体自身を除いたもの
+ const decoSlides=[];
+ for(const nid of sel){if(nid===mainNid)continue;const i=idxOf(nid);if(i<0)continue;
+  const n=notes[i];if(!n||n.sound||!n.seg)continue;decoSlides.push(n);}
+ if(decoSlides.length<1){toast('「範囲選択」で装飾にするスライドをまとめて選んでください');return;}
+
+ // 始点beat昇順に整列。同beatはランダムに並べる（結合順にこだわらないため）
+ const withBeat=decoSlides.map(n=>({n,b:b2f(n.beat)}));
+ withBeat.sort((a,b)=>a.b-b.b);
+ for(let i=0;i<withBeat.length;){
+  let j=i+1;
+  while(j<withBeat.length&&Math.abs(withBeat[j].b-withBeat[i].b)<1e-9)j++;
+  for(let k=j-1;k>i;k--){const r=i+Math.floor(Math.random()*(k-i+1));
+   [withBeat[k],withBeat[r]]=[withBeat[r],withBeat[k]];}
+  i=j;
+ }
+ const orderedDecos=withBeat.map(o=>o.n);
+
+ pushUndo();
+ const fixCount=mergeBranchesInto(mainSlide,orderedDecos);
+ clearChain();sel.clear();rebuildIndex();req();
+ toast('✅ 範囲で枝分かれ結合: 本体+'+orderedDecos.length+'本を処理'+(fixCount>0?'（重複 '+fixCount+' 箇所自動修復）':''));
 };
 $('#oV').onchange=e=>{offsetMs=+e.target.value||0;};
 for(const b of document.querySelectorAll('[data-t]'))b.onclick=()=>{
