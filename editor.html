@@ -49,14 +49,13 @@ input[type=number]{width:64px;background:#2c2c3d;color:#ddd;border:1px solid #44
  <select id="sSnap"></select>
  <button id="zIn">+</button><button id="zOut">−</button>
  <span class="sp"></span>
- <button data-t="move" class="on">移動</button><button data-t="box">範囲</button><button data-t="chain" title="スライドを結合する順にタップで選択">順番に選択</button>
- <button id="bDelSel">選択削除</button><button id="bClear">選択解除</button>
+ <button data-t="move" class="on">移動</button><button data-t="box">範囲選択</button><button data-t="chain" title="スライドを結合する順にタップで選択">順番に選択</button>
+ <button id="bClear">選択解除</button><button id="bChainClr" title="順番選択(「順番に選択」で選んだもの)をリセット">順番選択解除</button>
 
  <button id="bJoin" class="join" title="選択した順番でスライドを1つに結合">折り返し敷</button>
  <button id="bJoinAuto" class="join" title="「順番に選択」で判定を残す本体を1本選び、「範囲」で装飾スライドをまとめて選択→本体の始点beat順(同beatは順不同)で自動的に折り返し結合">範囲で折り返し敷</button>
  <button id="bBranch" class="join" title="選択順の1本目を本体・残りを枝分かれ装飾として一筆書き結合">枝分かれ敷</button>
  <button id="bBranchAuto" class="join" title="「順番に選択」で判定を残す本体を1本選び、「範囲」で装飾スライドをまとめて選択→本体の始点beat順(同beatは順不同)で自動的に枝分かれ結合">範囲で枝分かれ敷</button>
- <button id="bChainClr" title="順番選択をリセット">順番リセット</button>
  <button id="bSendBack" title="選択中のスライドの当たり判定を後回しにして、重なった下のスライドをタップで選べるようにする">背面へ</button>
  <button id="bUndo">⟲</button><button id="bRedo">⟳</button>
  <span>off</span><input type="number" id="oV" step="1">
@@ -387,11 +386,6 @@ function hitSlideForChain(px,py){if(!data)return -1;
 }
 
 /* ========== 編集操作 ========== */
-function deleteSel(){if(!sel.size)return;pushUndo();
- const idxs=[...sel].map(idxOf).filter(i=>i>=0).sort((x,y)=>y-x);
- for(const i of idxs)notes.splice(i,1);
- sel.clear();rebuildIndex();req();}
-
 /* ===== ポインタ：移動専用/範囲=編集+追加選択/ナビバー ===== */
 let pointers=new Map(),pinchS=null,panS=null,dragS=null,segS=null,boxS=null,navS=null,downI=null,togPend=null;
 let pClickX=0,pClickBeat=0;   // インタラクティブ型プラグイン用：直近のクリック位置
@@ -496,7 +490,6 @@ $('#bStop').onclick=stopPlay;
 $('#bHere').onclick=()=>{viewBeat=curBeat;req();};
 $('#zIn').onclick=()=>{ppb=clamp(ppb*1.25,6,500);req();};
 $('#zOut').onclick=()=>{ppb=clamp(ppb/1.25,6,500);req();};
-$('#bDelSel').onclick=deleteSel;
 $('#bClear').onclick=()=>{sel.clear();req();};
 
 /* ===== 「折り返し敷」= 選択順どおりにスライドを結合（index.htmlのロジック移植） ===== */
@@ -843,7 +836,7 @@ $('#sSnap').onchange=e=>snapDen=+e.target.value;
 
 /* ========== 将来プラグイン用API ========== */
 window.SlideEditor={get data(){return data},get notes(){return notes},get selection(){return sel},
- rebuild:()=>{rebuildIndex();req()},req,deleteSel,
+ rebuild:()=>{rebuildIndex();req()},req,
  b2f,fracBeat,beatToSec,secToBeat};
 
 /* ========== プラグインAPI (MalodyV PluginAPI互換 / Editorテーブル) ========== */
