@@ -52,6 +52,7 @@ input[type=number]{width:64px;background:#2c2c3d;color:#ddd;border:1px solid #44
  <button data-t="move" class="on">🔒</button><button data-t="box">範囲選択</button><button data-t="chain" title="スライドを結合する順にタップで選択">順番に選択</button>
  <button id="bClear">選択解除</button><button id="bChainClr" title="順番選択(「順番に選択」で選んだもの)をリセット">順番選択解除</button>
 
+ <button id="bJoinSeq" class="join" title="「範囲選択」または「順番に選択」で選んだ2個以上のスライドを、時系列(beat)順に前の終点→次の始点で一直線に結合">順列に結合</button>
  <button id="bJoin" class="join" title="選択した順番でスライドを1つに結合">折り返し敷</button>
  <button id="bJoinAuto" class="join" title="「順番に選択」で判定を残す本体を1本選び、「範囲」で装飾スライドをまとめて選択→本体の始点beat順(同beatは順不同)で自動的に折り返し結合">範囲で折り返し敷</button>
  <button id="bBranch" class="join" title="選択順の1本目を本体・残りを枝分かれ装飾として一筆書き結合">枝分かれ敷</button>
@@ -554,6 +555,117 @@ $('#bSendBack').onclick=()=>{
   return;
  }
  toast('先にスライドを選択してください');
+};
+
+/* ===== 「順列に結合」＝「範囲選択」でも「順番に選択」でも、選んだ2個以上のスライドを
+   時系列(beat)順に並べ、前のスライドの終点と次のスライドの始点をそのまま繋げて一直線に結合する。
+   （添付のjoin_slides_fixed.lua v1.2.0 と同等のロジックをJS側にネイティブ移植したもの）
+   行ったり来たりする「折り返し敷」とは違い、選択順は無視して常にbeat昇順で繋ぐ。
+   同一beatでXが異なる点（境目の疑似直角）は、クラスタ内の点数に応じて1/96拍幅を
+   均等に分割してオフセットし、間隔が狭すぎる場合は動的にステップ幅を縮める（丸ごと諦めない）。 */
+const JOIN_SEQ_EPS_DENOM=96,JOIN_SEQ_TOL=1e-9;
+function mergeChronologicalInto(targetSlides){
+ // 本体＝始点beatが最も早いスライド（同beatなら先に出てきた方を維持）
+ let mainSlide=targetSlides[0];
+ for(const n of targetSlides){
+  if(beatToPointArr(n.beat)<beatToPointArr(mainSlide.beat)-1e-12)mainSlide=n;
+ }
+ const mainStartBeat=mainSlide.beat;
+ const mainX=(typeof mainSlide.x==='number')?mainSlide.x:0;
+
+ // 絶対beatに変換して、全スライドの経路点(Rank0)＋本体以外の始点(Rank1)を集める
+ const segmentsList=[];
+ for(const n of targetSlides){
+  const segs=n.seg||[];
+  const nX=(typeof n.x==='number')?n.x:0;
+  for(const s of segs){
+   const absBeat=beatAddArr(n.beat,s.beat);
+   segmentsList.push({X:nX+(s.x||0),Beat:absBeat,Y:beatToPointArr(absBeat),Rank:0});
+  }
+  if(n!==mainSlide)segmentsList.push({X:nX,Beat:[...n.beat],Y:beatToPointArr(n.beat),Rank:1});
+ }
+ // beat昇順。同beatはRank昇順（前ノーツの終点→次ノーツの始点の順になるように）
+ segmentsList.sort((a,b)=>Math.abs(a.Y-b.Y)>JOIN_SEQ_TOL?a.Y-b.Y:a.Rank-b.Rank);
+
+ // パス1：完全に同一の点（beatもXも同じ）だけ間引く
+ const merged=[];
+ for(const seg of segmentsList){
+  if(!merged.length){merged.push(seg);continue;}
+  const prev=merged[merged.length-1];
+  const isDup=Math.abs(seg.Y-prev.Y)<=JOIN_SEQ_TOL&&Math.abs(seg.X-prev.X)<=JOIN_SEQ_TOL;
+  if(!isDup)merged.push(seg);
+ }
+
+ // パス2：同一beatが連続するクラスタごとに、疑似直角にならないよう微小オフセットを均等割り
+ const finalized=[];
+ let i=0;
+ while(i<merged.length){
+  let j=i;
+  while(j<merged.length-1&&Math.abs(merged[j+1].Y-merged[i].Y)<=JOIN_SEQ_TOL)j++;
+  const clusterSize=j-i+1;
+  if(clusterSize===1){
+   finalized.push(merged[i]);
+  }else{
+   const prevY=finalized.length?finalized[finalized.length-1].Y:-Infinity;
+   const availableGap=merged[i].Y-prevY;
+   const baseTotalShift=1/JOIN_SEQ_EPS_DENOM;
+   const safeTotalShift=Math.min(baseTotalShift,Math.max(0,availableGap-JOIN_SEQ_TOL)*0.5);
+   if(safeTotalShift<=JOIN_SEQ_TOL){
+    toast('順列に結合: 一部の重複点は間隔が狭すぎてずらせませんでした');
+    for(let k=i;k<=j;k++)finalized.push(merged[k]);
+   }else{
+    let stepDenom=Math.ceil((clusterSize-1)/safeTotalShift);
+    if(stepDenom<1)stepDenom=1;
+    for(let k=i;k<=j;k++){
+     const offsetSteps=(j-k); // 最後の点(=真の境界beat)は0のまま
+     const seg=merged[k];
+     if(offsetSteps===0){finalized.push(seg);}
+     else{
+      const shiftArr=[0,offsetSteps,stepDenom];
+      const shiftedBeat=beatDiffArr(seg.Beat,shiftArr);
+      finalized.push({X:seg.X,Beat:shiftedBeat,Y:beatToPointArr(shiftedBeat),Rank:seg.Rank});
+     }
+    }
+   }
+  }
+  i=j+1;
+ }
+
+ // 本体からの相対beat/Xへ変換してseg列として書き込む
+ const newSeg=[];
+ for(const seg of finalized){
+  const relBeat=beatDiffArr(seg.Beat,mainStartBeat);
+  newSeg.push({beat:relBeat,x:Math.round(seg.X-mainX)});
+ }
+ mainSlide.seg=newSeg;
+
+ // 本体以外を削除
+ const removeSet=new Set(targetSlides.filter(n=>n!==mainSlide));
+ data.note=notes=notes.filter(n=>!removeSet.has(n));
+ return mainSlide;
+}
+
+$('#bJoinSeq').onclick=()=>{
+ if(!data){alert('先にMCファイルを読み込んでください');return;}
+ // 「順番に選択」があればそれを、無ければ「範囲選択」を使う（どちらでも動くように）
+ let nids=null;
+ if(chainOrder.length>=1)nids=chainOrder;
+ else if(sel.size>=1)nids=[...sel];
+ if(!nids||!nids.length){toast('「範囲選択」または「順番に選択」でスライドを2個以上選んでください');return;}
+
+ const targetSlides=[],seen=new Set();
+ for(const nid of nids){
+  if(seen.has(nid))continue;seen.add(nid);
+  const i=idxOf(nid);if(i<0)continue;
+  const n=notes[i];if(!n||n.sound||!n.seg)continue;
+  targetSlides.push(n);
+ }
+ if(targetSlides.length<2){toast('スライドを2個以上選んでください（有効なスライドが不足しています）');return;}
+
+ pushUndo();
+ mergeChronologicalInto(targetSlides);
+ clearChain();sel.clear();rebuildIndex();req();
+ toast('✅ 順列に結合: '+targetSlides.length+'個を時系列順に結合しました');
 };
 
 /* ===== 「折り返し敷」の中核ロジックを共通関数化。
