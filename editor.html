@@ -52,7 +52,7 @@ input[type=number]{width:64px;background:#2c2c3d;color:#ddd;border:1px solid #44
  <button data-t="move" class="on">🔒</button><button data-t="box">範囲選択</button><button data-t="chain" title="スライドを結合する順にタップで選択">順番に選択</button>
  <button id="bClear">選択解除</button><button id="bChainClr" title="順番選択(「順番に選択」で選んだもの)をリセット">順番選択解除</button>
 
- <button id="bJoinSeq" class="join" title="「範囲選択」または「順番に選択」で選んだ2個以上のスライドを、始点beatが早い順に前の終点→次の始点で一直線に結合（各スライド内部の逆走/折り返しseg順序は変更しません）">順列に結合</button>
+ <button id="bJoinSeq" class="join" title="「範囲選択」または「順番に選択」で選んだ2個以上のスライドを、始点beatが早い順に前の終点→次の始点で一直線に結合（各スライド内部の逆走/折り返しseg順序は変更しません）">終点と始点を繋げる</button>
  <button id="bJoin" class="join" title="選択した順番でスライドを1つに結合">折り返し敷</button>
  <button id="bJoinAuto" class="join" title="「順番に選択」で判定を残す本体を1本選び、「範囲」で装飾スライドをまとめて選択→本体の始点beat順(同beatは順不同)で自動的に折り返し結合">範囲で折り返し敷</button>
  <button id="bBranch" class="join" title="選択順の1本目を本体・残りを枝分かれ装飾として一筆書き結合">枝分かれ敷</button>
@@ -275,7 +275,7 @@ function drawRibbon(n,pts){const m=pts.length;if(m<2)return;
  const hw=(n.w||57)/255*trackW/2;
  // 区間ごとに個別fill：重なった区間はαが積み重なって白くなる仕様のため、
  // 1パスにまとめず1区間＝1fillにする（まとめてしまうと重なり部のαが蓄積せず、
- // さらにsegが逆行/折り返すと巻き方向が反転してnonzero fillで相殺＝消える不具合も出る）。
+ // さらにsegが逆行/折り返すと巻き方向が反転してnonzero fillで相殺
  ctx.fillStyle='rgba(235,242,250,.35)';
  for(let p=0;p<m-1;p++){const a=pts[p],b=pts[p+1];
   if((a.py<-40&&b.py<-40)||(a.py>H+40&&b.py>H+40))continue;   // 画面外culling
@@ -324,7 +324,7 @@ function drawBox(){if(!boxS||boxS.x1==null)return;ctx.strokeStyle='#ff0';ctx.str
 function drawPlayline(){const b=playing?viewBeat:curBeat,y=b2y(b);
  ctx.strokeStyle='#f44';ctx.beginPath();ctx.moveTo(0,y+.5|0);ctx.lineTo(W,y+.5|0);ctx.stroke();}
 
-/* ===== hitNoteも厳密culling ===== */
+/* ===== hitNoteもculling ===== */
 function hitNote(px,py){if(!data)return null;
  const v0=y2b(H),hi=upperBound(y2b(0));
  const scan=(skipBack)=>{
