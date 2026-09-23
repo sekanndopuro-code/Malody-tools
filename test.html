@@ -6,7 +6,7 @@
 <title>Malody Slide Test Player v7</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
--webkit-user-select:none;user-select:none;font-family:system-ui,sans-serif;color:#dde}
+-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
 .ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
 justify-content:center;background:rgba(8,8,12,.86);z-index:10;padding:16px;box-sizing:border-box}
@@ -223,23 +223,47 @@ addEventListener('pointerdown',unlockAudioContext,{once:true,passive:true});
 addEventListener('click',unlockAudioContext,{once:true,passive:true});
 /* ===== 入力 ===== */
 const pointers=new Map(); let queue=[];
+const touchDots=[]; /* 生のタッチ座標を可視化するためのデバッグ用エフェクト(判定とは無関係) */
+let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化するためのデバッグ情報 */
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 function screenPoint(e){const r=cv.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
 function eventPerfMs(e){
   const ts=Number(e.timeStamp),now=performance.now();
-  if(!Number.isFinite(ts))return now;
-  if(Math.abs(ts-now)<10000)return ts;
-  const epochNow=performance.timeOrigin+now;
-  if(Math.abs(ts-epochNow)<100000)return ts-performance.timeOrigin;
-  return now;
+  let branch,result;
+  if(!Number.isFinite(ts)){branch='invalid';result=now;}
+  else if(Math.abs(ts-now)<10000){branch='raw';result=ts;}
+  else{
+    const epochNow=performance.timeOrigin+now;
+    if(Math.abs(ts-epochNow)<100000){branch='epoch';result=ts-performance.timeOrigin;}
+    else{branch='fallback';result=now;}
+  }
+  dbgTs={raw:ts,now,branch,result};
+  return result;
 }
 function eventSongMs(e){return clock.eventChartMs(eventPerfMs(e));}
-function pushEv(k,e){if(clock.state!=='playing')return;const q=screenPoint(e);
-queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t:eventSongMs(e)});}
-cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
-cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
-cv.addEventListener('pointerup',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
-cv.addEventListener('pointercancel',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
+function pushEv(k,e){
+  if(k==='down'||k==='move'){const q0=screenPoint(e);touchDots.push({x:q0.sx,y:q0.sy,t0:performance.now(),kind:k});
+  if(touchDots.length>40)touchDots.splice(0,touchDots.length-40);}
+  if(clock.state!=='playing')return;const q=screenPoint(e);
+  queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t:eventSongMs(e)});}
+/* iOS SafariはPointer Events + setPointerCaptureの組み合わせで、既に1本指が
+ * 押さえた状態のまま別の指でdownすると新しいpointerdownが発火しない(または
+ * 判定に届かない)ことがある。タッチ対応環境では素のTouch Eventsを使い、
+ * setPointerCaptureを経由しない経路にすることでこれを回避する。
+ * マウスのみの環境(PC)は従来通りPointer Eventsを使う。 */
+const supportsTouch=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
+if(supportsTouch){
+  const mk=(te,t)=>({pointerId:t.identifier,clientX:t.clientX,clientY:t.clientY,timeStamp:te.timeStamp});
+  cv.addEventListener('touchstart',e=>{for(const t of e.changedTouches)pushEv('down',mk(e,t));e.preventDefault();},{passive:false});
+  cv.addEventListener('touchmove',e=>{for(const t of e.changedTouches)pushEv('move',mk(e,t));e.preventDefault();},{passive:false});
+  cv.addEventListener('touchend',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));e.preventDefault();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));e.preventDefault();},{passive:false});
+}else{
+  cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
+  cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
+  cv.addEventListener('pointerup',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
+  cv.addEventListener('pointercancel',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
+}
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 /* ===== 判定コア ===== */
 let chart=null,logicMs=null,tapSweep=0,wipeSweep=0,dbgTouch=null,dbgInput=null,dbgEventCount=0;
@@ -521,6 +545,12 @@ for(let i=fx.length-1;i>=0;i--){const f=fx[i];
 const k=(performance.now()-f.t0)/380;
 if(k>=1){fx.splice(i,1);continue;}
 rectFlash(xAt(f.x,judgeY),f.w,k,{tap:'#bfefff',wipe:'#ffe9a0',slide:'#aef'}[f.kind]||'#bfefff');}
+/* 生タッチ座標エフェクト: 判定と無関係に「画面がタッチを検知したか」だけを可視化 */
+for(let i=touchDots.length-1;i>=0;i--){const d=touchDots[i];
+const k=(performance.now()-d.t0)/300;
+if(k>=1){touchDots.splice(i,1);continue;}
+ctx.save();ctx.globalAlpha=1-k;ctx.fillStyle=`hsl(28,50%,${55+10*k}%)`;
+ctx.beginPath();ctx.arc(d.x,d.y,(10+8*k)*u2,0,Math.PI*2);ctx.fill();ctx.restore();}
 if(lastJudge){const k=(performance.now()-lastJudge.t0)/500;
 if(k<1){ctx.save();ctx.translate(W/2,H*0.58);ctx.scale(0.55,1);
 ctx.globalAlpha=(1-k)*0.85;ctx.textAlign='center';
@@ -571,6 +601,7 @@ const inp=dbgInput;
 document.getElementById('dbg').textContent=
 `audio=${clock.audioMs().toFixed(1)} chart=${now.toFixed(1)} judge=${judgeNowFromChart(now).toFixed(1)} draw=${(now+cfg.tOff).toFixed(1)} logic=${(logicMs??0).toFixed(1)} fps=${fps} combo=${J.combo} ptr=${pointers.size} ev=${dbgEventCount} offset=${chart.chartOffset} clock=${clock.timingSource} perfToCtx=${clock.perfToCtxMs.toFixed(2)} speed=${cfg.speed}
 input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} dx=${inp.x.toFixed(0)} dy=${inp.y.toFixed(0)}`:'(no input yet)'}
+ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} result=${dbgTs.result.toFixed(1)} diff=${(dbgTs.result-dbgTs.now).toFixed(1)}`:'(no event yet)'} dots=${touchDots.length} inputMode=${supportsTouch?'touch':'pointer'}
 slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y}`:'(no touch yet)'}`;}
 /* ===== UI ===== */
