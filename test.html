@@ -118,8 +118,8 @@ let lo=0,hi=eff.eb.length-1; while(lo<hi){const m=(lo+hi+1)>>1;if(eff.eb[m]<=b)l
 return eff.ebase[lo]+eff.ecur[lo]*(b-eff.eb[lo]);}
 function readChartOffset(json){
   const direct=[json?.offset,json?.meta?.offset,json?.mode_ext?.offset];
-  for(const v of direct) if(Number.isFinite(Number(v))) return Number(v);
-  for(const n of (json?.note||[])) if(Number.isFinite(Number(n?.offset))) return Number(n.offset);
+  for(const v of direct) if(Number.isFinite(Number(v))) return -Number(v);
+  for(const n of (json?.note||[])) if(Number.isFinite(Number(n?.offset))) return -Number(n.offset);
   return 0;
 }
 function buildChart(json){
@@ -213,7 +213,7 @@ const posNow=ms=>{
   const beatMs=ms-chart.chartOffset;
   return cfg.eff?chartPosAtBeat(chart.eff,msToBeat(chart.tm,beatMs)):beatMs*chart.mainBpm/60000;
 };
-function yOfRaw(c,nowC){const dZ=(c-nowC)/visualSpeed();const den=perspB+dZ;if(den<=0.02)return NaN;
+function yOfRaw(c,nowC){const dZ=(c-nowC);const den=perspB+dZ;if(den<=0.02)return NaN;
 const sc=perspB/den;const y=horizonY+(judgeY-horizonY)*sc;return Number.isFinite(y)?y:NaN;}
 function yOf(c,nowC){const y=yOfRaw(c,nowC);if(!Number.isFinite(y)||y>judgeY+2*u2)return NaN;return y;}
 function slideXAtTime(s,ms){const T=s.nT,X=s.nX,n=T.length;if(n===1)return X[0];if(ms<=T[0])return X[0];if(ms>=T[n-1])return X[n-1];
