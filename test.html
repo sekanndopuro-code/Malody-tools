@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v8</title>
+<title>Malody Slide Test Player v9 (診断ログ入り)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
@@ -225,6 +225,13 @@ addEventListener('click',unlockAudioContext,{once:true,passive:true});
 const pointers=new Map(); let queue=[];
 const rawTouches=new Map(); /* id -> {x,y}: ブラウザから見て「今まさに触れている」生の状態をそのまま反映(判定・ゲーム状態とは無関係、遅延なし) */
 let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化するためのデバッグ情報 */
+/* ===== 入力診断: Safari側の生イベント欠落と、アプリ側のロジック欠落を切り分けるための計測 =====
+ * realEvt: ブラウザが実際に発火した touchstart/move/end/cancel の回数(合成イベントは含まない)
+ * synthDown/synthUp: syncTouchesが「取りこぼしただろう」と判断して復元した回数
+ * missNoEvt: MISS確定の瞬間、直近200ms以内に実イベントが1つも来ていなかった回数
+ *            →この値が大きいほど「アプリの判定ミスではなく、Safariがタッチ自体を配送していない」証拠になる
+ * missWithEvt: MISS確定の瞬間、直近200ms以内に実イベントが来ていた回数(配送はされたが判定に乗らなかった)*/
+const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0};
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 function screenPoint(e){const r=cv.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
 function eventPerfMs(e){
@@ -264,17 +271,19 @@ if(supportsTouch){
   function syncTouches(te){
     const rect=cv.getBoundingClientRect();
     const seen=new Set();
-    for(const t of te.touches){seen.add(t.identifier);if(!rawTouches.has(t.identifier))pushEv('down',mk(te,t));}
+    for(const t of te.touches){seen.add(t.identifier);if(!rawTouches.has(t.identifier)){dbgStats.synthDown++;pushEv('down',mk(te,t));}}
     for(const id of Array.from(rawTouches.keys())){
       if(seen.has(id))continue;
       const raw=rawTouches.get(id);
+      dbgStats.synthUp++;
       pushEv('up',{pointerId:id,clientX:rect.left+(raw?raw.x:0),clientY:rect.top+(raw?raw.y:0),timeStamp:te.timeStamp});
     }
   }
-  cv.addEventListener('touchstart',e=>{for(const t of e.changedTouches)pushEv('down',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchmove',e=>{for(const t of e.changedTouches)pushEv('move',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchend',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchcancel',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  const markReal=()=>{dbgStats.realEvt++;dbgStats.lastRealEventAt=performance.now();};
+  cv.addEventListener('touchstart',e=>{markReal();for(const t of e.changedTouches)pushEv('down',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchmove',e=>{markReal();for(const t of e.changedTouches)pushEv('move',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchend',e=>{markReal();for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{markReal();for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
 }else{
   cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
   cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
@@ -293,7 +302,9 @@ function judgeNowFromChart(chartMs){return chartMs+cfg.tOff;}
 function noteJudgeTime(t){return t;}
 function addJudge(tier,err,kind,bs){J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;if(tier==='MISS'){J.combo=0;J.miss.push({kind,bs,err:Math.round(err)});}lastJudge={tier,t0:performance.now(),err};}
 function judgeHit(n,err,kind){const t=tierOf(err);if(!t)return false;addJudge(t,err,kind,n.bs);if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(n.x,n.w,kind==='wipe'?'wipe':'tap');return true;}
-function missNote(n,kind){addJudge('MISS',1e9,kind,n.bs);}
+function missNote(n,kind){
+  if(performance.now()-dbgStats.lastRealEventAt>200)dbgStats.missNoEvt++;else dbgStats.missWithEvt++;
+  addJudge('MISS',1e9,kind,n.bs);}
 function fxPush(x,w,kind){if(fx.length>24)fx.shift();fx.push({x,w,kind,t0:performance.now()});}
 /* ===== 几何 ===== */
 let W=0,H=0,dpr=1,bgImg=null,u2=1;
@@ -629,7 +640,8 @@ document.getElementById('dbg').textContent=
 input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} dx=${inp.x.toFixed(0)} dy=${inp.y.toFixed(0)}`:'(no input yet)'}
 ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} result=${dbgTs.result.toFixed(1)} diff=${(dbgTs.result-dbgTs.now).toFixed(1)}`:'(no event yet)'} dots=${rawTouches.size} inputMode=${supportsTouch?'touch':'pointer'}
 slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
-touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y} held=${dbgTouch.held} result=${dbgTouch.result}`:'(no touch yet)'}`;}
+touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y} held=${dbgTouch.held} result=${dbgTouch.result}`:'(no touch yet)'}
+diag: realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}`;}
 /* ===== UI ===== */
 const $=id=>document.getElementById(id);
 const show=(id,on)=>$(id).classList.toggle('hide',!on);
