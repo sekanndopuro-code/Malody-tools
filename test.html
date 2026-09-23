@@ -201,6 +201,26 @@ const clock={
   eventChartMs(perfMs){return this.eventAudioMs(perfMs)+this.chartOffsetMs;},
   bufferEndChartMs(){return this.chartOffsetMs+(this.buf?this.buf.duration*1000:0)}
 };
+/* ===== iOS/Safari 音声アンロック =====
+ * SafariはAudioContextの「生成」が同期的なユーザー操作の呼び出しスタック内で
+ * 行われないと、その後どれだけresume()しても再生が始まらない(currentTimeが
+ * 進まない)ことがある。ファイル選択→arrayBuffer().then()の中でinit()すると
+ * 非同期コールバック内での生成になってしまうため、ページに触れた最初の瞬間に
+ * 同期的にAudioContextを生成し、無音バッファを鳴らして確実にアンロックする。 */
+let audioUnlocked=false;
+function unlockAudioContext(){
+  if(audioUnlocked)return;
+  clock.init();
+  const c=clock.ctx;
+  try{const b=c.createBuffer(1,1,22050);const s=c.createBufferSource();
+  s.buffer=b;s.connect(c.destination);s.start(0);}catch(e){}
+  const p=c.resume();
+  if(p&&typeof p.then==='function')p.catch(()=>{});
+  audioUnlocked=true;
+}
+addEventListener('touchstart',unlockAudioContext,{once:true,passive:true});
+addEventListener('pointerdown',unlockAudioContext,{once:true,passive:true});
+addEventListener('click',unlockAudioContext,{once:true,passive:true});
 /* ===== 入力 ===== */
 const pointers=new Map(); let queue=[];
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
@@ -635,10 +655,13 @@ function loadFile(f){const n=f.name.toLowerCase();
 if(n.endsWith('.mc')||n.endsWith('.json'))f.text().then(t=>{t=t.replace(/^\uFEFF/,'').trim();chart=buildChart(JSON.parse(t));resize();
 $('loadMsg').textContent=`譜面OK taps=${chart.taps.length} wipes=${chart.wipes.length} slides=${chart.slides.length} offset=${chart.chartOffset}ms`;})
 .catch(()=>{$('loadMsg').textContent='譜面の解析に失敗しました(JSON不正)';});
-else if(/\.(ogg|m4a|mp3|wav)$/.test(n))f.arrayBuffer().then(b=>{clock.init();
-return clock.ctx.decodeAudioData(b);})
+else if(/\.(ogg|m4a|mp3|wav)$/.test(n)){
+clock.init(); /* ユーザー操作のイベントハンドラ内で同期的に生成(Safari対策) */
+$('loadMsg').textContent='音楽を読み込み中…';
+f.arrayBuffer().then(b=>clock.ctx.decodeAudioData(b))
 .then(buf=>{clock.buf=buf;$('loadMsg').textContent='音楽OK';})
-.catch(()=>{$('loadMsg').textContent='デコード失敗(iOSはogg不可→m4a/mp3)';});
+.catch(err=>{$('loadMsg').textContent='デコード失敗: '+(err&&err.message?err.message:'このファイル形式はSafariで再生できません(oggで失敗する場合はm4a/mp3をお試しください)');});
+}
 else if(/\.(jpg|jpeg|png)$/.test(n)){const im=new Image();im.onload=()=>bgImg=im;im.src=URL.createObjectURL(f);}
 else $('loadMsg').textContent=`非対応: ${f.name} / 譜面=.mc,.json 音楽=.mp3,.m4a,.ogg,.wav 背景=.jpg,.png`;}
 ['fMc','fAu','fBg'].forEach(id=>$(id).addEventListener('change',e=>{for(const f of e.target.files)loadFile(f);}));
