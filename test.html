@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v7</title>
+<title>Malody Slide Test Player v8</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
@@ -254,10 +254,27 @@ function pushEv(k,e){
 const supportsTouch=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
 if(supportsTouch){
   const mk=(te,t)=>({pointerId:t.identifier,clientX:t.clientX,clientY:t.clientY,timeStamp:te.timeStamp});
-  cv.addEventListener('touchstart',e=>{for(const t of e.changedTouches)pushEv('down',mk(e,t));e.preventDefault();},{passive:false});
-  cv.addEventListener('touchmove',e=>{for(const t of e.changedTouches)pushEv('move',mk(e,t));e.preventDefault();},{passive:false});
-  cv.addEventListener('touchend',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));e.preventDefault();},{passive:false});
-  cv.addEventListener('touchcancel',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));e.preventDefault();},{passive:false});
+  /* Safariがtouchstartを取りこぼすことがある(特に、既に別指が触れている状態で
+   * もう1本を静止させたまま置いた場合)。changedTouchesだけでなく、その時点で
+   * ブラウザが認識している「現在触れている全指」(te.touches)を毎イベントごとに
+   * rawTouchesと突き合わせ、未登録の指があればその場でdownを復元し、逆に
+   * rawTouchesにいるのにte.touchesから消えている指があればupを復元する。
+   * これにより、当該の指自身のイベントが飛んでこなくても、他の指のイベントを
+   * きっかけに取りこぼしを検知・復旧できる。 */
+  function syncTouches(te){
+    const rect=cv.getBoundingClientRect();
+    const seen=new Set();
+    for(const t of te.touches){seen.add(t.identifier);if(!rawTouches.has(t.identifier))pushEv('down',mk(te,t));}
+    for(const id of Array.from(rawTouches.keys())){
+      if(seen.has(id))continue;
+      const raw=rawTouches.get(id);
+      pushEv('up',{pointerId:id,clientX:rect.left+(raw?raw.x:0),clientY:rect.top+(raw?raw.y:0),timeStamp:te.timeStamp});
+    }
+  }
+  cv.addEventListener('touchstart',e=>{for(const t of e.changedTouches)pushEv('down',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchmove',e=>{for(const t of e.changedTouches)pushEv('move',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchend',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
 }else{
   cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
   cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
@@ -432,10 +449,14 @@ ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function rectFlash(x,w255,k,tint){ /* hitフラッシュ: 拡散しながらフェード */
 const wPx=Math.max(26*u2,w255/255*fieldW(judgeY))*(1+0.3*k);
 const hPx=34*u2*(1+0.3*k);
-ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=1-k;
-ctx.shadowColor=tint;ctx.shadowBlur=20*u2*(1-k);
+ctx.save();ctx.globalCompositeOperation='lighter';
+/* shadowBlurはiPad Safariで特に重く、連打時のメインスレッド詰まり(=タッチ取りこぼし)の
+ * 一因になるため、大きめの半透明レイヤーを1枚重ねる安価な疑似グローに置き換える */
+ctx.globalAlpha=(1-k)*0.35;
+ctx.fillStyle=tint;rr(x-wPx*0.62,judgeY-hPx*0.62,wPx*1.24,hPx*1.24,10*u2);ctx.fill();
+ctx.globalAlpha=1-k;
 ctx.fillStyle=tint;rr(x-wPx/2,judgeY-hPx/2,wPx,hPx,6*u2);ctx.fill();
-ctx.shadowBlur=0;ctx.globalAlpha=(1-k)*0.9;
+ctx.globalAlpha=(1-k)*0.9;
 ctx.fillStyle='#fff';rr(x-wPx/2+3*u2,judgeY-hPx/2+3*u2,wPx-6*u2,hPx-6*u2,4*u2);ctx.fill();
 ctx.restore();}
 function tracePulse(x,w255,tag){
@@ -459,10 +480,12 @@ function drawSlideTrail(S){
 function traceRect(x,w255,alpha){ /* slide追跡中: 指の下のリボン幅長方形 */
 const wPx=Math.max(26*u2,w255/255*fieldW(judgeY));
 const hPx=30*u2;
-ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=alpha;
-ctx.shadowColor='#8ef';ctx.shadowBlur=16*u2;
+ctx.save();ctx.globalCompositeOperation='lighter';
+ctx.globalAlpha=alpha*0.4;
+ctx.fillStyle='#8ef';rr(x-wPx*0.62,judgeY-hPx*0.62,wPx*1.24,hPx*1.24,8*u2);ctx.fill();
+ctx.globalAlpha=alpha;
 ctx.fillStyle='rgba(180,230,255,.8)';rr(x-wPx/2,judgeY-hPx/2,wPx,hPx,5*u2);ctx.fill();
-ctx.shadowBlur=0;ctx.fillStyle='rgba(255,255,255,.9)';
+ctx.fillStyle='rgba(255,255,255,.9)';
 rr(x-wPx/2+2*u2,judgeY-hPx/2+2*u2,wPx-4*u2,hPx-4*u2,3*u2);ctx.fill();
 ctx.restore();}
 /* ===== 描画 ===== */
@@ -480,6 +503,13 @@ ctx.moveTo(cx-w/2+sk,y-th/2);ctx.lineTo(cx+w/2+sk,y-th/2);
 ctx.lineTo(cx+w/2,y+th/2);ctx.lineTo(cx-w/2,y+th/2);ctx.closePath();ctx.fill();
 ctx.strokeStyle=kind==='wipe'?'rgba(255,240,170,.9)':'rgba(230,245,255,.9)';
 ctx.lineWidth=1.2;ctx.stroke();}
+let laneEdgeGrad=null,laneEdgeGradJudgeY=null;
+function getLaneEdgeGrad(){ /* 毎フレーム2回createLinearGradientしていたのをjudgeY不変な間はキャッシュ */
+if(!laneEdgeGrad||laneEdgeGradJudgeY!==judgeY){
+laneEdgeGrad=ctx.createLinearGradient(0,0,0,judgeY);
+laneEdgeGrad.addColorStop(0,'#7ec8e8');laneEdgeGrad.addColorStop(0.5,'#ffffff');laneEdgeGrad.addColorStop(1,'#dfeef8');
+laneEdgeGradJudgeY=judgeY;}
+return laneEdgeGrad;}
 function draw(nowChartMs){
 const drawMs=nowChartMs+cfg.tOff;
 const now=drawMs;
@@ -490,9 +520,7 @@ else{ctx.fillStyle='#101018';ctx.fillRect(0,0,W,H);}
 const nowC=posNow(now);
 for(const ex of[0,255]){
 const x0=xAt(ex,judgeY),x1=xAt(ex,0);
-const g=ctx.createLinearGradient(0,0,0,judgeY);
-g.addColorStop(0,'#7ec8e8');g.addColorStop(0.5,'#ffffff');g.addColorStop(1,'#dfeef8');
-ctx.strokeStyle=g;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(x1,0);ctx.lineTo(x0,judgeY);ctx.stroke();
+ctx.strokeStyle=getLaneEdgeGrad();ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(x1,0);ctx.lineTo(x0,judgeY);ctx.stroke();
 ctx.strokeStyle='#1b6f93';ctx.lineWidth=2;ctx.beginPath();
 ctx.moveTo(x1+(ex<0?6:-6),0);ctx.lineTo(x0+(ex<0?8:-8),judgeY);ctx.stroke();}
 /* slideリボン（ラインで途切る） */
@@ -502,7 +530,7 @@ if(s.state==='done')continue;
 ctx.fillStyle='rgba(206,209,215,0.5)';
 for(let i=0;i<s.nC.length-1;i++){
 const c0=s.nC[i],c1=s.nC[i+1],x0=s.nX[i],x1=s.nX[i+1],w0=s.nW[i],w1=s.nW[i+1];
-const dc=Math.abs(c1-c0),samples=Math.max(16,Math.min(64,Math.ceil(dc*12)+1));
+const dc=Math.abs(c1-c0),samples=Math.max(8,Math.min(24,Math.ceil(dc*6)+1));
 let prev=null;
 for(let q=0;q<=samples;q++){
 const f=q/samples,c=c0+(c1-c0)*f;
