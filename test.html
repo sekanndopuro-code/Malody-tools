@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v6</title>
+<title>Malody Slide Test Player v7</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;font-family:system-ui,sans-serif;color:#dde}
@@ -30,8 +30,8 @@ background:rgba(15,15,25,.72);color:#eef;cursor:pointer;backdrop-filter:blur(2px
 .pauseCtrl .pauseHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;color:#dde}
 .pauseCtrl output{font-family:ui-monospace,monospace;color:#9fe}
 .pauseCtrl input[type=range]{width:100%;accent-color:#9fe}
-#dbg{position:absolute;top:8px;left:8px;z-index:5;font:11px/1.5 monospace;color:#7f7;
-background:rgba(0,0,0,.55);padding:6px;border-radius:6px;white-space:pre;display:none}
+#dbg{position:fixed;top:98px;left:8px;right:8px;z-index:30;font:11px/1.45 monospace;color:#7f7;
+background:rgba(0,0,0,.72);padding:6px 8px;border-radius:6px;white-space:pre;display:none;pointer-events:none;box-sizing:border-box;max-width:calc(100vw - 16px)}
 .miss{font:11px monospace;color:#f88}
 details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 </style>
@@ -41,14 +41,13 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <div id="dbg"></div>
 <div id="load" class="ov">
 <div class="panel">
-<h2>Malody Slide Test Player v6</h2>
+<h2>Malody Slide Test Player v7</h2>
 <div class="row"><span class="fl">① 譜面ファイルを選択（.mc / .json）</span><input type="file" id="fMc"></div>
 <div class="row"><span class="fl">② 音楽ファイルを選択（.mp3 / .m4a / .ogg / .wav）</span><input type="file" id="fAu"></div>
 <div class="row"><span class="fl">③ 背景画像（任意: .jpg / .png）</span><input type="file" id="fBg"></div>
 <div class="row" id="loadMsg" style="color:#fc6"></div>
 <details><summary>設定</summary>
-<div class="row"><label>judge offset ms</label><input type="number" id="sJOff" value="0" step="5"></div>
-<div class="row"><label>graphic offset ms</label><input type="number" id="sGOff" value="0" step="5"></div>
+<div class="row"><label>タイミングオフセット ms</label><input type="number" id="sTOff" value="0" step="5" min="-300" max="300"></div>
 <div class="row"><label>speed</label><input type="number" id="sSpeed" value="1" step="1" min="-20" max="20"></div>
 <div class="row"><label>approach ms</label><input type="number" id="sLead" value="1400" step="100"></div>
 <div class="row"><label><input type="checkbox" id="sAuto"> autoplay</label>
@@ -58,7 +57,7 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <label><input type="checkbox" id="sDbg"> デバッグ</label></div>
 </details>
 <div class="row"><button id="btnPlay">PLAY</button></div>
-<div style="color:#889;font-size:11px">mc+音楽必須 / 背景任意 / D&D対応 / 判定C固定 / Space=pause<br>
+<div style="color:#889;font-size:11px">mc+音楽必須 / 背景任意 / D&D対応 / 判定C固定 / Space=pause<br>タイミングオフセットは譜面表示と判定を同時に動かします<br>
 slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点でチェック演出 / 軌跡エフェクトあり</div>
 </div>
 </div>
@@ -71,12 +70,8 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 <input type="range" id="pSpeed" min="-20" max="20" step="1" value="1">
 </div>
 <div class="pauseCtrl">
-<div class="pauseHead"><label for="pGOff">譜面オフセット</label><output id="pGOffVal">0 ms</output></div>
-<input type="range" id="pGOff" min="-300" max="300" step="5" value="0">
-</div>
-<div class="pauseCtrl">
-<div class="pauseHead"><label for="pJOff">判定オフセット</label><output id="pJOffVal">0 ms</output></div>
-<input type="range" id="pJOff" min="-150" max="150" step="5" value="0">
+<div class="pauseHead"><label for="pTOff">タイミングオフセット</label><output id="pTOffVal">0 ms</output></div>
+<input type="range" id="pTOff" min="-300" max="300" step="5" value="0">
 </div>
 <button id="btnResume">RESUME</button><button id="btnRetry" class="sub">RETRY</button>
 <button id="btnQuit" class="sub">QUIT</button></div></div>
@@ -89,9 +84,9 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 "use strict";
 /* ===== 定数 ===== */
 const WIN={best:36,cool:76,good:110,miss:150}, ACCW={BEST:100,COOL:75,GOOD:40,MISS:0};
-const STEP=1000/60, TICK=80, AUTO=-999, INPUT_SLOP=2.5, SLIDE_TRAIL_MS=260;
+const STEP=1000/60, TICK=100, AUTO=-999, INPUT_SLOP=2.5, SLIDE_TRAIL_MS=260;
 const SLIDE_TAIL_FREE_MS=200, SLIDE_BUF_SIZE=20, SLIDE_HANDOFF_GRACE_MS=120;
-const cfg={jOff:0,gOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false};
+const cfg={tOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false};
 /* ===== 譜面パース ===== */
 const beatF=b=>b[0]+b[1]/(b[2]||1), beatStr=b=>b[2]===1?`${b[0]}`:`${b[0]}+${b[1]}/${b[2]}`;
 function buildTiming(a){const evs=(a||[]).filter(t=>t.bpm!==undefined)
@@ -117,14 +112,18 @@ function chartPosAtBeat(eff,b){if(!eff.eb.length)return b; if(b<=eff.eb[0])retur
 let lo=0,hi=eff.eb.length-1; while(lo<hi){const m=(lo+hi+1)>>1;if(eff.eb[m]<=b)lo=m;else hi=m-1;}
 return eff.ebase[lo]+eff.ecur[lo]*(b-eff.eb[lo]);}
 function readChartOffset(json){
+  /* Canonical meaning in this player:
+   *   chartTime = audioTime + chartOffset
+   * The file value is kept untouched and applied only at the audio->chart
+   * conversion boundary.  This avoids offset being baked into note.t. */
   const direct=[json?.offset,json?.meta?.offset,json?.mode_ext?.offset];
-  for(const v of direct) if(Number.isFinite(Number(v))) return -Number(v);
-  for(const n of (json?.note||[])) if(Number.isFinite(Number(n?.offset))) return -Number(n.offset);
+  for(const v of direct) if(Number.isFinite(Number(v))) return Number(v);
+  for(const n of (json?.note||[])) if(Number.isFinite(Number(n?.offset))) return Number(n.offset);
   return 0;
 }
 function buildChart(json){
 const tm=buildTiming(json.time),eff=buildEffect(json.effect,tm),cAt=b=>chartPosAtBeat(eff,b);
-const chartOffset=readChartOffset(json),tAt=b=>beatToMs(tm,b)+chartOffset;
+const chartOffset=readChartOffset(json),tAt=b=>beatToMs(tm,b);
 const taps=[],wipes=[],slides=[];
 for(const n of(json.note||[])){ if(n.type===1)continue;
 const b=beatF(n.beat),t=tAt(b),x=n.x??128,w=n.w??64;
@@ -146,17 +145,62 @@ slides.forEach((s,i)=>s.id=i);
 const last=Math.max(0,...taps.map(n=>n.t),...wipes.map(n=>n.t),...slides.map(s=>s.end));
 return{tm,eff,taps,wipes,slides,last,mainBpm:tm.evs[0].bpm,chartOffset};}
 /* ===== 時計 ===== */
-const clock={ctx:null,src:null,buf:null,state:'stopped',baseSongMs:0,baseCtxTime:0,p2a:0,
-init(){if(!this.ctx)this.ctx=new(window.AudioContext||window.webkitAudioContext)();},
-calib(){const d=this.ctx.currentTime-performance.now()/1000;this.p2a=this.p2a?this.p2a*0.9+d*0.1:d;},
-play(from){if(!this.buf)return;this.kill();const s=this.ctx.createBufferSource();s.buffer=this.buf;
-s.connect(this.ctx.destination);const lead=0.06;s.start(this.ctx.currentTime+lead,Math.max(0,from)/1000);
-this.src=s;this.baseSongMs=from;this.baseCtxTime=this.ctx.currentTime+lead;this.state='playing';},
-kill(){if(this.src){try{this.src.stop()}catch(e){}this.src.disconnect();this.src=null;}},
-pause(){if(this.state!=='playing')return;this.baseSongMs=this.songMs();this.kill();this.state='paused';},
-resume(){if(this.state==='paused'){this.ctx.resume();this.play(this.baseSongMs);}},
-songMs(){return this.state==='playing'?this.baseSongMs+(this.ctx.currentTime-this.baseCtxTime)*1000:this.baseSongMs;},
-eventSongMs(ts){return this.baseSongMs+((ts/1000+this.p2a)-this.baseCtxTime)*1000;}};
+const clock={
+  ctx:null,src:null,buf:null,state:'stopped',
+  baseAudioMs:0,baseCtxTime:0,
+  chartOffsetMs:0,
+  perfToCtxMs:0,
+  runPerfStart:0,
+  runCtxStart:0,
+  timingSource:'currentTime',
+  init(){if(!this.ctx)this.ctx=new(window.AudioContext||window.webkitAudioContext)();},
+  setChartOffset(ms){this.chartOffsetMs=Number(ms)||0;},
+  refreshMapping(){
+    if(!this.ctx)return;
+    this.perfToCtxMs=this.ctx.currentTime*1000-performance.now();
+  },
+  performanceToContextMs(perfMs){
+    if(this.runPerfStart>0){
+      return this.runCtxStart+(perfMs-this.runPerfStart)/1000;
+    }
+    this.refreshMapping();
+    return (perfMs+this.perfToCtxMs)/1000;
+  },
+  play(fromAudioMs){
+    if(!this.buf)return;
+    this.kill();
+    this.ctx.resume();
+    this.refreshMapping();
+    const lead=0.06;
+    const nowCtx=this.ctx.currentTime;
+    const startCtx=nowCtx+lead;
+    const startPerf=performance.now()+lead*1000;
+    const s=this.ctx.createBufferSource();
+    s.buffer=this.buf;
+    s.connect(this.ctx.destination);
+    s.start(startCtx,Math.max(0,fromAudioMs)/1000);
+    this.src=s;
+    this.baseAudioMs=Math.max(0,fromAudioMs);
+    this.baseCtxTime=startCtx;
+    this.runCtxStart=startCtx;
+    this.runPerfStart=startPerf;
+    this.state='playing';
+  },
+  kill(){if(this.src){try{this.src.stop()}catch(e){}this.src.disconnect();this.src=null;}},
+  pause(){if(this.state!=='playing')return;this.baseAudioMs=this.audioMs();this.kill();this.state='paused';this.runPerfStart=0;this.runCtxStart=0;},
+  resume(){if(this.state==='paused'){this.ctx.resume();this.play(this.baseAudioMs);}},
+  audioMs(){
+    if(this.state!=='playing')return this.baseAudioMs;
+    return Math.max(this.baseAudioMs,this.baseAudioMs+(this.ctx.currentTime-this.baseCtxTime)*1000);
+  },
+  chartMs(){return this.audioMs()+this.chartOffsetMs;},
+  eventAudioMs(perfMs){
+    const ctxAtEvent=this.performanceToContextMs(perfMs);
+    return this.baseAudioMs+(ctxAtEvent-this.baseCtxTime)*1000;
+  },
+  eventChartMs(perfMs){return this.eventAudioMs(perfMs)+this.chartOffsetMs;},
+  bufferEndChartMs(){return this.chartOffsetMs+(this.buf?this.buf.duration*1000:0)}
+};
 /* ===== 入力 ===== */
 const pointers=new Map(); let queue=[];
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
@@ -169,7 +213,7 @@ function eventPerfMs(e){
   if(Math.abs(ts-epochNow)<100000)return ts-performance.timeOrigin;
   return now;
 }
-function eventSongMs(e){return clock.eventSongMs(eventPerfMs(e));}
+function eventSongMs(e){return clock.eventChartMs(eventPerfMs(e));}
 function pushEv(k,e){if(clock.state!=='playing')return;const q=screenPoint(e);
 queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t:eventSongMs(e)});}
 cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
@@ -178,13 +222,13 @@ cv.addEventListener('pointerup',e=>{pushEv('up',e);e.preventDefault();},{passive
 cv.addEventListener('pointercancel',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 /* ===== 判定コア ===== */
-let chart=null,logicMs=0,tapSweep=0,wipeSweep=0,dbgTouch=null;
+let chart=null,logicMs=null,tapSweep=0,wipeSweep=0,dbgTouch=null,dbgInput=null,dbgEventCount=0;
 const J={combo:0,maxCombo:0,accSum:0,accN:0,counts:{BEST:0,COOL:0,GOOD:0,MISS:0},miss:[]};
 let lastJudge=null; const fx=[];
 const tierOf=e=>{const a=Math.abs(e);return a<=WIN.best?'BEST':a<=WIN.cool?'COOL':a<=WIN.good?'GOOD':a<=WIN.miss?'MISS':null;};
 const hitHalfW=w=>Math.max(3,w*0.5+INPUT_SLOP);
 const slideTol=w=>hitHalfW(w);
-function judgeNowFromAudio(audioMs){return audioMs+cfg.jOff;}
+function judgeNowFromChart(chartMs){return chartMs+cfg.tOff;}
 function noteJudgeTime(t){return t;}
 function addJudge(tier,err,kind,bs){J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;if(tier==='MISS'){J.combo=0;J.miss.push({kind,bs,err:Math.round(err)});}lastJudge={tier,t0:performance.now(),err};}
 function judgeHit(n,err,kind){const t=tierOf(err);if(!t)return false;addJudge(t,err,kind,n.bs);if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(n.x,n.w,kind==='wipe'?'wipe':'tap');return true;}
@@ -208,10 +252,9 @@ const laneMargin=()=>Math.max(8,Math.min(28,W*0.03));
 const fieldW=y=>Math.max(0,W-2*laneMargin())*scaleAtY(y);
 const xAt=(x255,y)=>W/2+(x255/255-0.5)*fieldW(y);
 function laneX255(sx,y){const r=Math.max(0.001,fieldW(y));return Math.max(0,Math.min(255,128+(sx-W/2)*255/r));}
-const posNow=ms=>{
+const posNow=chartMs=>{
   if(!chart)return 0;
-  const beatMs=ms-chart.chartOffset;
-  return cfg.eff?chartPosAtBeat(chart.eff,msToBeat(chart.tm,beatMs)):beatMs*chart.mainBpm/60000;
+  return cfg.eff?chartPosAtBeat(chart.eff,msToBeat(chart.tm,chartMs)):chartMs*chart.mainBpm/60000;
 };
 function yOfRaw(c,nowC){const dZ=(c-nowC);const den=perspB+dZ;if(den<=0.02)return NaN;
 const sc=perspB/den;const y=horizonY+(judgeY-horizonY)*sc;return Number.isFinite(y)?y:NaN;}
@@ -245,11 +288,11 @@ for(const[id,p]of pointers){if(p.ownerSlideId!==null&&p.ownerSlideId!==S.id)cont
 return bestId;}
 function judgeSlideHead(S,judgeMs){if(S.headJudged)return S.headTier;const et=noteJudgeTime(S.t0),tier=tierOf(judgeMs-et);if(!tier)return null;S.headJudged=true;S.headTier=tier;addJudge(tier,judgeMs-et,'slide',S.bs);if(tier!=='MISS'&&cfg.startC){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(S.nX[0],S.nW[0],'slide');return tier;}
 function failSlideBody(S){if(S.bodyFailed)return;S.bodyFailed=true;if(!S.headJudged){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');return;}if(S.headTier&&S.headTier!=='MISS'){J.counts[S.headTier]=Math.max(0,J.counts[S.headTier]-1);J.accSum-=ACCW[S.headTier];J.accN=Math.max(0,J.accN-1);addJudge('MISS',1e9,'slide',S.bs);S.headTier='MISS';}}
-function wipeCovered(w){for(const[id,p]of pointers){if(p.ownerSlideId!==null)continue;if(Math.abs(p.x-w.x)<=hitHalfW(w.w))return true;}return false;}
+function wipeCovered(w){for(const[id,p]of pointers){if(Math.abs(p.x-w.x)<=hitHalfW(w.w))return true;}return false;}
 function clearWipe(w){addJudge('BEST',0,'wipe',w.bs);J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);fxPush(w.x,w.w,'wipe');w.state='cleared';w.ptr=-1;}
 function processPointerInput(ev){
   const p=pointers.get(ev.id);if(!p)return;
-  const judgeMs=judgeNowFromAudio(ev.t),x255=p.x;
+  const judgeMs=judgeNowFromChart(ev.t),x255=p.x;
   if(ev.kind==='down'){
     let nearT=null,nearDt=1e9;for(const n of chart.taps){if(n.state)continue;const dt=judgeMs-noteJudgeTime(n.t);if(Math.abs(dt)<Math.abs(nearDt)){nearDt=dt;nearT=n;}}
     if(nearT){const y=yOfRaw(nearT.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);dbgTouch={sx:ev.sx.toFixed(0),dt:Math.round(nearDt),dx:Math.round(xx-nearT.x),w:nearT.w,y:y.toFixed(0)};}else dbgTouch={sx:ev.sx.toFixed(0),dt:null,dx:null,w:null,y:null};
@@ -265,7 +308,15 @@ function processPointerInput(ev){
     }
     catchSlideBody(judgeMs,x255,ev.id);
   }else if(ev.kind==='move'){
-    if(p.ownerSlideId!==null){const S=chart.slides[p.ownerSlideId];if(S&&!S.finalized)S.followX=x255;return;}
+    if(p.ownerSlideId!==null){
+      if(cfg.suck){
+        const w=wipeCandidate(judgeMs,x255);
+        if(w)clearWipe(w);
+      }
+      const S=chart.slides[p.ownerSlideId];
+      if(S&&!S.finalized)S.followX=x255;
+      return;
+    }
     catchSlideBody(judgeMs,x255,ev.id);
   }else if(ev.kind==='up'){
     const owner=p.ownerSlideId;if(owner!==null){const S=chart.slides[owner];if(S&&!S.finalized){if(S.ptr===ev.id)S.ptr=-1;S.noOwnerSince=judgeMs;S.state='active';}p.ownerSlideId=null;}
@@ -279,10 +330,10 @@ function onMove(ev){const p=pointers.get(ev.id);if(!p)return;p.sx=ev.sx;p.sy=ev.
 function onUp(ev){const p=pointers.get(ev.id);if(!p)return;processPointerInput(ev);}
 /* ===== 論理ステップ ===== */
 function step(t){
-  const judgeMs=judgeNowFromAudio(t);
+  const judgeMs=judgeNowFromChart(t);
   if(cfg.auto)autoPlay(judgeMs);
   /* ===== wipe: 静的指でもBEST成立。ただしslide所有指は対象外 ===== */
-  for(const w of chart.wipes){if(w.state!=='pending')continue;const et=noteJudgeTime(w.t);if(judgeMs<et)continue;if(judgeMs>w.t+cfg.jOff+WIN.miss){w.state='missed';missNote(w,'wipe');continue;}if(judgeMs<=et+WIN.best&&wipeCovered(w)){w.entryErr=0;clearWipe(w);}}
+  for(const w of chart.wipes){if(w.state!=='pending')continue;const et=noteJudgeTime(w.t);if(judgeMs<et)continue;if(judgeMs>w.t+cfg.tOff+WIN.miss){w.state='missed';missNote(w,'wipe');continue;}if(judgeMs<=et+WIN.best&&wipeCovered(w)){w.entryErr=0;clearWipe(w);}}
   /* ===== slide head miss ===== */
   for(const S of chart.slides){if(!S.headJudged){const et=noteJudgeTime(S.t0);if(judgeMs>et+WIN.miss){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');}}}
   /* ===== slide body ===== */
@@ -290,6 +341,7 @@ function step(t){
     if(S.state==='done')continue;ensureSlideCP(S);if(judgeMs<S.t0)continue;
     if(S.finalized){if(judgeMs>=S.end){if(S.success){S.state='done';fxPush(S.nX[S.nX.length-1],S.nW[S.nW.length-1],'slide');tracePulse(S.nX[S.nX.length-1],S.nW[S.nW.length-1],'end');}else S.state='missed';if(S.ptr!==-1){const p=pointers.get(S.ptr);if(p&&p.ownerSlideId===S.id)p.ownerSlideId=null;}S.ptr=-1;}continue;}
     const reqUntil=slideRequiredUntil(S);
+    if(S.nextTick<=0)S.nextTick=S.t0+TICK;
     if(judgeMs>=reqUntil){
       let success;
       if(reqUntil<=S.t0+STEP){if(!S.headJudged){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');}success=S.headJudged&&S.headTier!=='MISS';}
@@ -308,6 +360,16 @@ function step(t){
       if(S.ptr!==-1){const op=pointers.get(S.ptr);if(op&&op.ownerSlideId===S.id)op.ownerSlideId=null;S.ptr=-1;}
       if(!S.noOwnerSince)S.noOwnerSince=judgeMs;
       if(judgeMs-S.noOwnerSince>SLIDE_HANDOFF_GRACE_MS)S.state='missed';
+    }
+    /* Slide body ticks: +1 combo every 100ms while the slide is being held correctly.
+       The final 200ms tail is excluded by reqUntil. */
+    while(S.nextTick<=judgeMs && S.nextTick<reqUntil){
+      if(S.state==='active' && S.headJudged && S.headTier!=='MISS' && S.avgOk){
+        S.ticks++;
+        J.combo++;
+        J.maxCombo=Math.max(J.maxCombo,J.combo);
+      }
+      S.nextTick+=TICK;
     }
     while(S.cpIndex<S.cp.length&&judgeMs>=S.cp[S.cpIndex].t){const cp=S.cp[S.cpIndex];if(S.avgOk){cp.seen=true;fxPush(cp.x,cp.w,'slide');tracePulse(cp.x,cp.w,'checkpoint');}S.cpIndex++;}
   }
@@ -374,10 +436,9 @@ ctx.moveTo(cx-w/2+sk,y-th/2);ctx.lineTo(cx+w/2+sk,y-th/2);
 ctx.lineTo(cx+w/2,y+th/2);ctx.lineTo(cx-w/2,y+th/2);ctx.closePath();ctx.fill();
 ctx.strokeStyle=kind==='wipe'?'rgba(255,240,170,.9)':'rgba(230,245,255,.9)';
 ctx.lineWidth=1.2;ctx.stroke();}
-function draw(nowMs){
-const drawMs=nowMs+cfg.gOff;
+function draw(nowChartMs){
+const drawMs=nowChartMs+cfg.tOff;
 const now=drawMs;
-const judgeDrawMs=nowMs+cfg.jOff;
 ctx.clearRect(0,0,W,H);
 if(bgImg){const s=Math.max(W/bgImg.width,H/bgImg.height);
 ctx.drawImage(bgImg,(W-bgImg.width*s)/2,(H-bgImg.height*s)/2,bgImg.width*s,bgImg.height*s);}
@@ -422,7 +483,7 @@ if(s.state==='done')continue;
 const y=yOf(s.nC[0],nowC);
 if(Number.isFinite(y)&&y>-60)slab(xAt(s.nX[0],y),y,s.nW[0]/255*fieldW(y),34*u2*scaleAtY(y),'tap');
 if(s.state==='active'){
-  const target=slideXAtTime(s,judgeDrawMs),tw=slideWAtTime(s,judgeDrawMs);
+  const target=slideXAtTime(s,drawMs),tw=slideWAtTime(s,drawMs);
   const on=s.avgOk;
   const p=s.ptr!==-1?pointers.get(s.ptr):null;
   if(p){drawSlideTrail(s);}
@@ -472,9 +533,9 @@ let rafId=0,dbgTick=0;
 function frame(){rafId=requestAnimationFrame(frame);
 fpsN++;const ft=performance.now();if(ft-fpsT>1000){fps=fpsN;fpsN=0;fpsT=ft;}
 if(!chart){return;}
-if(clock.state!=='playing'){draw(clock.songMs());return;}
-clock.calib();
-const now=clock.songMs();
+if(clock.state!=='playing'){draw(clock.chartMs());return;}
+const now=clock.chartMs();
+if(logicMs===null)logicMs=now-STEP;
 queue.sort((a,b)=>a.t-b.t);let qi=0;
 const consumeUntil=l=>{while(qi<queue.length&&queue[qi].t<l){const ev=queue[qi++];
 if(ev.kind==='down')onDown(ev);else if(ev.kind==='move')onMove(ev);else onUp(ev);}};
@@ -484,26 +545,51 @@ consumeUntil(now+0.001);queue=queue.slice(qi);
 draw(now);
 if(cfg.dbg&&(++dbgTick%6===0))drawDbg(now);
 if(now>songEndMs()){clock.pause();showResult();}}
-function songEndMs(){return Math.max(chart.last+1500,(clock.buf?clock.buf.duration*1000:0));}
+function songEndMs(){return Math.max(chart.last+1500,clock.bufferEndChartMs());}
 function drawDbg(now){const s=chart.slides.find(s=>s.state==='active');
+const inp=dbgInput;
 document.getElementById('dbg').textContent=
-`audio=${now.toFixed(1)} judge=${judgeNowFromAudio(now).toFixed(1)} draw=${(now+cfg.gOff).toFixed(1)} fps=${fps} combo=${J.combo} ptr=${pointers.size} offset=${chart.chartOffset} speed=${cfg.speed}
-slide: ${s?`tx=${slideXAtTime(s,judgeNowFromAudio(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromAudio(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} cp=${s.cpIndex}/${s.cp.length}`:'-'}
+`audio=${clock.audioMs().toFixed(1)} chart=${now.toFixed(1)} judge=${judgeNowFromChart(now).toFixed(1)} draw=${(now+cfg.tOff).toFixed(1)} logic=${(logicMs??0).toFixed(1)} fps=${fps} combo=${J.combo} ptr=${pointers.size} ev=${dbgEventCount} offset=${chart.chartOffset} clock=${clock.timingSource} perfToCtx=${clock.perfToCtxMs.toFixed(2)} speed=${cfg.speed}
+input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} dx=${inp.x.toFixed(0)} dy=${inp.y.toFixed(0)}`:'(no input yet)'}
+slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y}`:'(no touch yet)'}`;}
 /* ===== UI ===== */
 const $=id=>document.getElementById(id);
 const show=(id,on)=>$(id).classList.toggle('hide',!on);
 function resetRun(){J.combo=0;J.maxCombo=0;J.accSum=0;J.accN=0;
 J.counts={BEST:0,COOL:0,GOOD:0,MISS:0};J.miss.length=0;fx.length=0;lastJudge=null;
-logicMs=0;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();
+logicMs=null;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();dbgInput=null;dbgEventCount=0;dbgTick=0;
 for(const n of chart.taps)n.state=0;
 for(const w of chart.wipes){w.state='pending';w.ptr=-1;w.entryErr=0;}
 for(const s of chart.slides){s.state='pending';s.ptr=-1;s.followX=0;s.noOwnerSince=0;s.nextTick=0;s.ticks=0;
 s.cp=[];s.cpIndex=0;s.cpInit=false;s.trail=[];s.startedCombo=false;
 s.headJudged=false;s.headTier=null;s.bodyFailed=false;s.buf=[];s.bufSum=0;s.avgErr=0;s.avgOk=false;s.everOk=false;s.lastOkTv=0;s.finalized=false;s.success=false;}}
-function startRun(){resetRun();clock.init();clock.ctx.resume().then(()=>{clock.play(0);
-show('load',false);show('pause',false);show('result',false);$('pauseBtn').style.display='block';
-$('dbg').style.display=cfg.dbg?'block':'none';syncPauseControls();});}
+function startRun(){
+  try{
+    resetRun();
+    clock.init();
+    clock.setChartOffset(chart.chartOffset);
+    /* Start the source synchronously from the PLAY gesture. Do not wait on resume().
+       Some browsers can defer/reject the Promise; waiting here leaves the UI apparently dead. */
+    clock.play(0);
+    /* Establish the logic cursor on the same chart-time axis used by rendering and input. */
+    logicMs=clock.chartMs()-STEP;
+    show('load',false);show('pause',false);show('result',false);$('pauseBtn').style.display='block';
+    $('dbg').style.display=cfg.dbg?'block':'none';syncPauseControls();
+    const resumeP=clock.ctx.resume();
+    if(resumeP&&typeof resumeP.catch==='function') resumeP.catch(err=>{
+      console.warn('AudioContext resume failed',err);
+      clock.pause();clock.state='stopped';
+      $('pauseBtn').style.display='none';show('pause',false);show('load',true);
+      $('loadMsg').textContent='音声の再生開始に失敗しました: '+(err&&err.message?err.message:String(err));
+    });
+  }catch(err){
+    console.error(err);
+    clock.state='stopped';$('pauseBtn').style.display='none';
+    show('pause',false);show('load',true);
+    $('loadMsg').textContent='PLAY開始エラー: '+(err&&err.message?err.message:String(err));
+  }
+}
 function showResult(){$('pauseBtn').style.display='none';show('result',true);
 $('resBody').textContent=
 `ACC  ${(J.accN?J.accSum/J.accN:100).toFixed(2)}%
@@ -512,7 +598,10 @@ BEST ${J.counts.BEST} / COOL ${J.counts.COOL} / GOOD ${J.counts.GOOD} / MISS ${J
 slide ticks ${chart.slides.reduce((a,s)=>a+s.ticks,0)}`;
 $('resMiss').innerHTML=J.miss.slice(0,200)
 .map(m=>`<div class="miss">${m.kind} beat=${m.bs} err=${m.err>1e8?'--':m.err+'ms'}</div>`).join('');}
-$('btnPlay').onclick=()=>{if(!chart||!clock.buf){$('loadMsg').textContent='mcと音楽が必要です';return;}startRun();};
+$('btnPlay').onclick=()=>{
+  if(!chart||!clock.buf){$('loadMsg').textContent='mcと音楽が必要です';return;}
+  startRun();
+};
 function pauseGame(){if(clock.state!=='playing')return;clock.pause();syncPauseControls();show('pause',true);}
 $('pauseBtn').onclick=pauseGame;
 $('btnResume').onclick=()=>{clock.resume();show('pause',false);};
@@ -524,20 +613,24 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&clock.stat
 const bind=(id,key,num)=>$(id).addEventListener('input',e=>{
 cfg[key]=num?parseFloat(e.target.value):e.target.checked;
 if(key==='lead'||key==='speed')resize();
+if(key==='tOff'){
+  if($('pTOff'))$('pTOff').value=cfg.tOff;
+  if($('pTOffVal'))$('pTOffVal').textContent=Math.round(cfg.tOff)+' ms';
+}
 if(key==='dbg')$('dbg').style.display=cfg.dbg?'block':'none';});
-bind('sJOff','jOff',1);bind('sGOff','gOff',1);bind('sSpeed','speed',1);bind('sLead','lead',1);
+bind('sTOff','tOff',1);bind('sSpeed','speed',1);bind('sLead','lead',1);
 bind('sAuto','auto');bind('sEff','eff');bind('sSuck','suck');
 bind('sStartC','startC');bind('sDbg','dbg');
 function syncPauseControls(){
 $('pSpeed').value=cfg.speed; $('pSpeedVal').textContent=cfg.speed.toFixed(0)+'x';
-$('pGOff').value=cfg.gOff; $('pGOffVal').textContent=Math.round(cfg.gOff)+' ms';
-$('pJOff').value=cfg.jOff; $('pJOffVal').textContent=Math.round(cfg.jOff)+' ms';}
+$('pTOff').value=cfg.tOff; $('pTOffVal').textContent=Math.round(cfg.tOff)+' ms';}
 $('pSpeed').addEventListener('input',e=>{cfg.speed=parseFloat(e.target.value);
 $('pSpeedVal').textContent=cfg.speed.toFixed(0)+'x';resize();});
-$('pGOff').addEventListener('input',e=>{cfg.gOff=parseFloat(e.target.value);
-$('pGOffVal').textContent=Math.round(cfg.gOff)+' ms';});
-$('pJOff').addEventListener('input',e=>{cfg.jOff=parseFloat(e.target.value);
-$('pJOffVal').textContent=Math.round(cfg.jOff)+' ms';});
+$('pTOff').addEventListener('input',e=>{
+  cfg.tOff=parseFloat(e.target.value);
+  $('pTOffVal').textContent=Math.round(cfg.tOff)+' ms';
+  $('sTOff').value=cfg.tOff;
+});
 function loadFile(f){const n=f.name.toLowerCase();
 if(n.endsWith('.mc')||n.endsWith('.json'))f.text().then(t=>{t=t.replace(/^\uFEFF/,'').trim();chart=buildChart(JSON.parse(t));resize();
 $('loadMsg').textContent=`譜面OK taps=${chart.taps.length} wipes=${chart.wipes.length} slides=${chart.slides.length} offset=${chart.chartOffset}ms`;})
