@@ -49,12 +49,11 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <details><summary>設定</summary>
 <div class="row"><label>judge offset ms</label><input type="number" id="sJOff" value="0" step="5"></div>
 <div class="row"><label>graphic offset ms</label><input type="number" id="sGOff" value="0" step="5"></div>
-<div class="row"><label>speed</label><input type="number" id="sSpeed" value="1" step="0.1" min="0.3" max="4"></div>
+<div class="row"><label>speed</label><input type="number" id="sSpeed" value="1" step="1" min="-20" max="20"></div>
 <div class="row"><label>approach ms</label><input type="number" id="sLead" value="1400" step="100"></div>
 <div class="row"><label><input type="checkbox" id="sAuto"> autoplay</label>
 <label><input type="checkbox" id="sEff" checked> scrollギミック</label></div>
-<div class="row"><label><input type="checkbox" id="sTrace" checked> wipeなぞり必須</label>
-<label><input type="checkbox" id="sSuck" checked> wipe吸われ</label></div>
+<div class="row"><label><input type="checkbox" id="sSuck" checked> wipe吸われ</label></div>
 <div class="row"><label><input type="checkbox" id="sStartC" checked> slide開始をコンボに数える</label>
 <label><input type="checkbox" id="sDbg"> デバッグ</label></div>
 </details>
@@ -69,7 +68,7 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 <div id="pause" class="ov hide"><div class="panel" style="text-align:center"><h2>PAUSE</h2>
 <div class="pauseCtrl">
 <div class="pauseHead"><label for="pSpeed">ノーツ速度</label><output id="pSpeedVal">1.00x</output></div>
-<input type="range" id="pSpeed" min="0.30" max="4.00" step="0.05" value="1.00">
+<input type="range" id="pSpeed" min="-20" max="20" step="1" value="1">
 </div>
 <div class="pauseCtrl">
 <div class="pauseHead"><label for="pGOff">譜面オフセット</label><output id="pGOffVal">0 ms</output></div>
@@ -90,8 +89,9 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 "use strict";
 /* ===== 定数 ===== */
 const WIN={best:36,cool:76,good:110,miss:150}, ACCW={BEST:100,COOL:75,GOOD:40,MISS:0};
-const STEP=1000/60, TICK=80, AUTO=-999, INPUT_SLOP=2.5, TRACK_GRACE_MS=120, SLIDE_TRAIL_MS=260;
-const cfg={jOff:0,gOff:0,speed:1,lead:1400,auto:false,eff:true,trace:true,suck:true,startC:false,dbg:false};
+const STEP=1000/60, TICK=80, AUTO=-999, INPUT_SLOP=2.5, SLIDE_TRAIL_MS=260;
+const SLIDE_TAIL_FREE_MS=200, SLIDE_BUF_SIZE=20, SLIDE_HANDOFF_GRACE_MS=120;
+const cfg={jOff:0,gOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false};
 /* ===== 譜面パース ===== */
 const beatF=b=>b[0]+b[1]/(b[2]||1), beatStr=b=>b[2]===1?`${b[0]}`:`${b[0]}+${b[1]}/${b[2]}`;
 function buildTiming(a){const evs=(a||[]).filter(t=>t.bpm!==undefined)
@@ -116,27 +116,35 @@ return{eb,ebase,ecur};}
 function chartPosAtBeat(eff,b){if(!eff.eb.length)return b; if(b<=eff.eb[0])return b;
 let lo=0,hi=eff.eb.length-1; while(lo<hi){const m=(lo+hi+1)>>1;if(eff.eb[m]<=b)lo=m;else hi=m-1;}
 return eff.ebase[lo]+eff.ecur[lo]*(b-eff.eb[lo]);}
+function readChartOffset(json){
+  const direct=[json?.offset,json?.meta?.offset,json?.mode_ext?.offset];
+  for(const v of direct) if(Number.isFinite(Number(v))) return Number(v);
+  for(const n of (json?.note||[])) if(Number.isFinite(Number(n?.offset))) return Number(n.offset);
+  return 0;
+}
 function buildChart(json){
 const tm=buildTiming(json.time),eff=buildEffect(json.effect,tm),cAt=b=>chartPosAtBeat(eff,b);
+const chartOffset=readChartOffset(json),tAt=b=>beatToMs(tm,b)+chartOffset;
 const taps=[],wipes=[],slides=[];
 for(const n of(json.note||[])){ if(n.type===1)continue;
-const b=beatF(n.beat),t=beatToMs(tm,b),x=n.x??128,w=n.w??64;
+const b=beatF(n.beat),t=tAt(b),x=n.x??128,w=n.w??64;
 if(n.seg&&n.seg.length){
 const nT=[t],nX=[x],nC=[cAt(b)],nW=[w]; let cw=w;
 for(const s of n.seg){ if(s.w!==undefined)cw=s.w; const sb=b+beatF(s.beat);
-nT.push(beatToMs(tm,sb)); nX.push(x+(s.x||0)); nC.push(cAt(sb)); nW.push(cw); }
-slides.push({
- t0:t,end:nT[nT.length-1],w,bs:beatStr(n.beat),nT,nX,nC,nW,
- state:'pending',ptr:-1,followX:0,badSince:0,nextTick:0,ticks:0,
- cp:[],cpIndex:0,trail:[],startedCombo:false,
- headJudged:false,headTier:null,bodyFailed:false
-});
-} else if(n.type===4) wipes.push({t,x,w,bs:beatStr(n.beat),c:cAt(b),state:'pending',ptr:-1,entryErr:0,trace:0,lastX:0});
+nT.push(tAt(sb)); nX.push(x+(s.x||0)); nC.push(cAt(sb)); nW.push(cw); }
+slides.push({id:slides.length,t0:t,end:nT[nT.length-1],w,bs:beatStr(n.beat),nT,nX,nC,nW,
+state:'pending',ptr:-1,followX:0,noOwnerSince:0,nextTick:0,ticks:0,
+cp:[],cpIndex:0,cpInit:false,trail:[],startedCombo:false,
+headJudged:false,headTier:null,bodyFailed:false,
+buf:[],bufSum:0,avgErr:0,avgOk:false,everOk:false,lastOkTv:0,
+finalized:false,success:false});
+} else if(n.type===4) wipes.push({t,x,w,bs:beatStr(n.beat),c:cAt(b),state:'pending',ptr:-1,entryErr:0});
 else taps.push({t,x,w,bs:beatStr(n.beat),c:cAt(b),state:0});
 }
 taps.sort((a,b)=>a.t-b.t);wipes.sort((a,b)=>a.t-b.t);slides.sort((a,b)=>a.t0-b.t0);
+slides.forEach((s,i)=>s.id=i);
 const last=Math.max(0,...taps.map(n=>n.t),...wipes.map(n=>n.t),...slides.map(s=>s.end));
-return{tm,eff,taps,wipes,slides,last,mainBpm:tm.evs[0].bpm};}
+return{tm,eff,taps,wipes,slides,last,mainBpm:tm.evs[0].bpm,chartOffset};}
 /* ===== 時計 ===== */
 const clock={ctx:null,src:null,buf:null,state:'stopped',baseSongMs:0,baseCtxTime:0,p2a:0,
 init(){if(!this.ctx)this.ctx=new(window.AudioContext||window.webkitAudioContext)();},
@@ -161,13 +169,10 @@ function eventPerfMs(e){
   if(Math.abs(ts-epochNow)<100000)return ts-performance.timeOrigin;
   return now;
 }
-function eventSongMs(e){
-  return clock.eventSongMs(eventPerfMs(e));
-}
+function eventSongMs(e){return clock.eventSongMs(eventPerfMs(e));}
 function pushEv(k,e){if(clock.state!=='playing')return;const q=screenPoint(e);
 queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t:eventSongMs(e)});}
-cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){}
-pushEv('down',e);e.preventDefault();},{passive:false});
+cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
 cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
 cv.addEventListener('pointerup',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
 cv.addEventListener('pointercancel',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
@@ -176,265 +181,143 @@ cv.addEventListener('contextmenu',e=>e.preventDefault());
 let chart=null,logicMs=0,tapSweep=0,wipeSweep=0,dbgTouch=null;
 const J={combo:0,maxCombo:0,accSum:0,accN:0,counts:{BEST:0,COOL:0,GOOD:0,MISS:0},miss:[]};
 let lastJudge=null; const fx=[];
-const tierOf=e=>{const a=Math.abs(e);
-return a<=WIN.best?'BEST':a<=WIN.cool?'COOL':a<=WIN.good?'GOOD':a<=WIN.miss?'MISS':null;};
-const expectT=t=>t-cfg.gOff+cfg.jOff;
+const tierOf=e=>{const a=Math.abs(e);return a<=WIN.best?'BEST':a<=WIN.cool?'COOL':a<=WIN.good?'GOOD':a<=WIN.miss?'MISS':null;};
 const hitHalfW=w=>Math.max(3,w*0.5+INPUT_SLOP);
-const trackHalfW=w=>Math.max(4,w*0.5+INPUT_SLOP);
-function addJudge(tier,err,kind,bs){J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;
-if(tier==='MISS'){J.combo=0;J.miss.push({kind,bs,err:Math.round(err)});}
-lastJudge={tier,t0:performance.now(),err};}
-function judgeHit(n,err,kind){const t=tierOf(err);if(!t)return false;
-addJudge(t,err,kind,n.bs);if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}
-fxPush(n.x,n.w,kind==='wipe'?'wipe':'tap');return true;}
+const slideTol=w=>hitHalfW(w);
+function judgeNowFromAudio(audioMs){return audioMs+cfg.jOff;}
+function noteJudgeTime(t){return t;}
+function addJudge(tier,err,kind,bs){J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;if(tier==='MISS'){J.combo=0;J.miss.push({kind,bs,err:Math.round(err)});}lastJudge={tier,t0:performance.now(),err};}
+function judgeHit(n,err,kind){const t=tierOf(err);if(!t)return false;addJudge(t,err,kind,n.bs);if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(n.x,n.w,kind==='wipe'?'wipe':'tap');return true;}
 function missNote(n,kind){addJudge('MISS',1e9,kind,n.bs);}
 function fxPush(x,w,kind){if(fx.length>24)fx.shift();fx.push({x,w,kind,t0:performance.now()});}
 /* ===== 几何 ===== */
 let W=0,H=0,dpr=1,bgImg=null,u2=1;
 let judgeY=0,horizonY=0,perspB=1,leadChart=4;
+function visualSpeed(){const v=Math.abs(Number(cfg.speed)||0);return Math.max(.05,v);}
 function resize(){dpr=Math.min(1.25,window.devicePixelRatio||1);
 W=cv.clientWidth;H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;
 ctx.setTransform(dpr,0,0,dpr,0,0);u2=Math.max(.5,Math.min(1.5,H/1080));
 judgeY=H*0.92;horizonY=-H*0.35;
 const fTop=(0-horizonY)/(judgeY-horizonY);
 leadChart=cfg.lead/(60000/(chart?chart.mainBpm:220));
-perspB=fTop*leadChart/(Math.max(.05,cfg.speed)*(1-fTop));}
+perspB=fTop*leadChart/(visualSpeed()*(1-fTop));}
 addEventListener('resize',resize);
 const clamp01=v=>Math.max(0,Math.min(1,v));
 const scaleAtY=y=>clamp01((y-horizonY)/(judgeY-horizonY));
 const laneMargin=()=>Math.max(8,Math.min(28,W*0.03));
 const fieldW=y=>Math.max(0,W-2*laneMargin())*scaleAtY(y);
 const xAt=(x255,y)=>W/2+(x255/255-0.5)*fieldW(y);
-function laneX255(sx,y){const r=Math.max(0.001,fieldW(y));
-return Math.max(0,Math.min(255,128+(sx-W/2)*255/r));}
-const posNow=ms=>cfg.eff?chartPosAtBeat(chart.eff,msToBeat(chart.tm,ms)):ms*chart.mainBpm/60000;
-function yOfRaw(c,nowC){const dZ=(c-nowC)/Math.max(.05,cfg.speed);
-const den=perspB+dZ; if(den<=0.02)return NaN;
-const sc=perspB/den; const y=horizonY+(judgeY-horizonY)*sc;
-return Number.isFinite(y)?y:NaN;}
-function yOf(c,nowC){const y=yOfRaw(c,nowC);
-if(!Number.isFinite(y)||y>judgeY+2*u2)return NaN; return y;}
-/* slide gameplay position is time-based (Malody hit test), visual position stays effect-based. */
-function slideXAtTime(s,ms){
-const T=s.nT,X=s.nX,n=T.length;
-if(n===1)return X[0];
-if(ms<=T[0])return X[0];
-if(ms>=T[n-1])return X[n-1];
-let lo=0,hi=n-1;while(lo<hi){const m=(lo+hi+1)>>1;if(T[m]<=ms)lo=m;else hi=m-1;}
-const den=T[lo+1]-T[lo],f=den>0?(ms-T[lo])/den:0;
-return X[lo]+(X[lo+1]-X[lo])*f;
-}
-function slideVisualX(s,nowC){
-const C=s.nC,n=C.length;
-if(n===1)return s.nX[0];
-if(nowC<=C[0])return s.nX[0]; if(nowC>=C[n-1])return s.nX[n-1];
-let lo=0,hi=n-1;while(lo<hi){const m=(lo+hi+1)>>1;if(C[m]<=nowC)lo=m;else hi=m-1;}
-const den=C[lo+1]-C[lo],f=den>0?(nowC-C[lo])/den:0;
-return s.nX[lo]+(s.nX[lo+1]-s.nX[lo])*f;
-}
-function slideWAtTime(s,ms){
- const T=s.nT,WW=s.nW,n=T.length;
- if(n===1)return WW[0];
- if(ms<=T[0])return WW[0];
- if(ms>=T[n-1])return WW[n-1];
- let lo=0,hi=n-1;
- while(lo<hi){const m=(lo+hi+1)>>1;if(T[m]<=ms)lo=m;else hi=m-1;}
- const den=T[lo+1]-T[lo],f=den>0?(ms-T[lo])/den:0;
- return WW[lo]+(WW[lo+1]-WW[lo])*f;
-}
+function laneX255(sx,y){const r=Math.max(0.001,fieldW(y));return Math.max(0,Math.min(255,128+(sx-W/2)*255/r));}
+const posNow=ms=>{
+  if(!chart)return 0;
+  const beatMs=ms-chart.chartOffset;
+  return cfg.eff?chartPosAtBeat(chart.eff,msToBeat(chart.tm,beatMs)):beatMs*chart.mainBpm/60000;
+};
+function yOfRaw(c,nowC){const dZ=(c-nowC)/visualSpeed();const den=perspB+dZ;if(den<=0.02)return NaN;
+const sc=perspB/den;const y=horizonY+(judgeY-horizonY)*sc;return Number.isFinite(y)?y:NaN;}
+function yOf(c,nowC){const y=yOfRaw(c,nowC);if(!Number.isFinite(y)||y>judgeY+2*u2)return NaN;return y;}
+function slideXAtTime(s,ms){const T=s.nT,X=s.nX,n=T.length;if(n===1)return X[0];if(ms<=T[0])return X[0];if(ms>=T[n-1])return X[n-1];
+let lo=0,hi=n-1;while(lo<hi){const m=(lo+hi+1)>>1;if(T[m]<=ms)lo=m;else hi=m-1;}const den=T[lo+1]-T[lo],f=den>0?(ms-T[lo])/den:0;return X[lo]+(X[lo+1]-X[lo])*f;}
+function slideWAtTime(s,ms){const T=s.nT,WW=s.nW,n=T.length;if(n===1)return WW[0];if(ms<=T[0])return WW[0];if(ms>=T[n-1])return WW[n-1];
+let lo=0,hi=n-1;while(lo<hi){const m=(lo+hi+1)>>1;if(T[m]<=ms)lo=m;else hi=m-1;}const den=T[lo+1]-T[lo],f=den>0?(ms-T[lo])/den:0;return WW[lo]+(WW[lo+1]-WW[lo])*f;}
+function slideVisualX(s,nowC){const C=s.nC,n=C.length;if(n===1)return s.nX[0];if(nowC<=C[0])return s.nX[0];if(nowC>=C[n-1])return s.nX[n-1];
+let lo=0,hi=n-1;while(lo<hi){const m=(lo+hi+1)>>1;if(C[m]<=nowC)lo=m;else hi=m-1;}const den=C[lo+1]-C[lo],f=den>0?(nowC-C[lo])/den:0;return s.nX[lo]+(s.nX[lo+1]-s.nX[lo])*f;}
 const slideHeadY=(s,msVis)=>yOfRaw(s.nC[0],posNow(msVis));
-/* ===== 候補探索 / 入力判定 ===== */
-function lowerTaps(t){let lo=0,hi=chart.taps.length;
- while(lo<hi){const m=(lo+hi)>>1;if(chart.taps[m].t<t)lo=m+1;else hi=m;}return lo;}
-function nearestTap(sx,ms){const a=lowerTaps(ms-WIN.miss-400);let best=null,bd=1e9;
- for(let i=a;i<chart.taps.length;i++){const n=chart.taps[i],et=expectT(n.t);
-  if(et>ms+WIN.miss)break; if(ms<et-WIN.miss||n.state)continue;
-  const y=yOfRaw(n.c,posNow(ms+cfg.gOff));
-  const x=laneX255(sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
-  if(Math.abs(x-n.x)>hitHalfW(n.w))continue;
-  const d=Math.abs(ms-et); if(d<bd){bd=d;best=n;}
- }
- return best;
-}
-function tryHitWipe(ms,x255){
- let best=null,bestDelay=1e9;
- for(const w of chart.wipes){
-  if(w.state!=='pending')continue;
-  const et=expectT(w.t);
-  if(ms<et||ms>et+WIN.miss)continue;
-  if(Math.abs(x255-w.x)>hitHalfW(w.w))continue;
-  const delay=ms-et;
-  if(delay<bestDelay){bestDelay=delay;best=w;}
- }
- if(!best)return false;
- best.entryErr=ms-expectT(best.t);
- clearWipe(best);
- return true;
-}
-function nearestSlideHead(sx,ms){
- const x=laneX255(sx,judgeY);let best=null,bestDiff=1e9;
- for(const S of chart.slides){
-  if(S.headJudged)continue;
-  const et=expectT(S.t0);
-  if(ms<et-WIN.miss||ms>et+WIN.miss)continue;
-  if(Math.abs(x-S.nX[0])>hitHalfW(S.nW[0]))continue;
-  const diff=Math.abs(ms-et);
-  if(diff<bestDiff){bestDiff=diff;best=S;}
- }
- return best;
-}
-function judgeSlideHead(S,ms){
- if(S.headJudged)return;
- const et=expectT(S.t0),err=ms-et,tier=tierOf(err);
- if(!tier)return;
- S.headJudged=true;S.headTier=tier;
- addJudge(tier,err,'slide',S.bs);
- if(tier!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}
- fxPush(S.nX[0],S.nW[0],'slide');
-}
-function tryCatchSlide(ms,x255,ptrId){
- for(const S of chart.slides){
-  if(S.state==='done'||S.state==='missed')continue;
-  if(ms<S.t0||ms>S.end)continue;
-  const target=slideXAtTime(S,ms),ww=slideWAtTime(S,ms);
-  if(Math.abs(x255-target)<=hitHalfW(ww)){
-   S.state='active';S.ptr=ptrId;S.followX=x255;S.badSince=0;S.released=false;
-   return true;
+/* ===== 統一入力調停 ===== */
+function lowerTaps(t){let lo=0,hi=chart.taps.length;while(lo<hi){const m=(lo+hi)>>1;if(chart.taps[m].t<t)lo=m+1;else hi=m;}return lo;}
+function nearestTap(sx,judgeMs){const a=lowerTaps(judgeMs-WIN.miss-400);let best=null,bd=1e9;
+for(let i=a;i<chart.taps.length;i++){const n=chart.taps[i];if(n.state)continue;const et=noteJudgeTime(n.t);if(et>judgeMs+WIN.miss)break;if(judgeMs<et-WIN.miss||n.state)continue;const y=yOfRaw(n.c,posNow(judgeMs));const x=laneX255(sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);if(Math.abs(x-n.x)>hitHalfW(n.w))continue;const d=Math.abs(judgeMs-et);if(d<bd){bd=d;best=n;}}
+return best;}
+function nearestSlideHead(sx,judgeMs){const x=laneX255(sx,judgeY);let best=null,bd=1e9;
+for(const S of chart.slides){if(S.headJudged)continue;const et=noteJudgeTime(S.t0);if(judgeMs<et-WIN.miss||judgeMs>et+WIN.miss)continue;if(Math.abs(x-S.nX[0])>hitHalfW(S.nW[0]))continue;const d=Math.abs(judgeMs-et);if(d<bd){bd=d;best=S;}}
+return best;}
+function wipeCandidate(judgeMs,x255){let best=null,bd=1e9;for(const w of chart.wipes){if(w.state!=='pending')continue;const et=noteJudgeTime(w.t);if(judgeMs<et||judgeMs>et+WIN.best)continue;if(Math.abs(x255-w.x)>hitHalfW(w.w))continue;const d=judgeMs-et;if(d<bd){bd=d;best=w;}}return best;}
+function ensureSlideCP(S){if(S.cpInit)return;S.cp=S.nT.slice(1,-1).map((tt,i)=>({t:tt,x:S.nX[i+1],w:S.nW[i+1],seen:false}));S.cpIndex=0;S.cpInit=true;}
+function resetSlideBuffer(S){S.buf.length=0;S.bufSum=0;S.avgErr=0;S.avgOk=false;}
+function pushSlideError(S,err){if(S.buf.length>=SLIDE_BUF_SIZE)S.bufSum-=S.buf.shift();S.buf.push(err);S.bufSum+=err;}
+function slideRequiredUntil(S){return Math.max(S.t0,S.end-SLIDE_TAIL_FREE_MS);}
+function assignSlideOwner(S,ptrId,judgeMs){if(S.ptr===ptrId)return true;if(S.ptr!==-1){const old=pointers.get(S.ptr);if(old&&old.ownerSlideId===S.id)old.ownerSlideId=null;}
+resetSlideBuffer(S);S.ptr=ptrId;S.noOwnerSince=0;const p=pointers.get(ptrId);if(p)p.ownerSlideId=S.id;S.state='active';S.followX=p?p.x:S.followX;return true;}
+function chooseSlidePointer(S,judgeMs){const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs));
+if(S.ptr!==-1&&pointers.has(S.ptr)){const p=pointers.get(S.ptr);if(p.ownerSlideId===S.id&&Math.abs(p.x-target)<=tol*2)return S.ptr;}
+let bestId=null,bd=tol;
+for(const[id,p]of pointers){if(p.ownerSlideId!==null&&p.ownerSlideId!==S.id)continue;const d=Math.abs(p.x-target);if(d<=tol&&d<bd){bd=d;bestId=id;}}
+return bestId;}
+function judgeSlideHead(S,judgeMs){if(S.headJudged)return S.headTier;const et=noteJudgeTime(S.t0),tier=tierOf(judgeMs-et);if(!tier)return null;S.headJudged=true;S.headTier=tier;addJudge(tier,judgeMs-et,'slide',S.bs);if(tier!=='MISS'&&cfg.startC){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(S.nX[0],S.nW[0],'slide');return tier;}
+function failSlideBody(S){if(S.bodyFailed)return;S.bodyFailed=true;if(!S.headJudged){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');return;}if(S.headTier&&S.headTier!=='MISS'){J.counts[S.headTier]=Math.max(0,J.counts[S.headTier]-1);J.accSum-=ACCW[S.headTier];J.accN=Math.max(0,J.accN-1);addJudge('MISS',1e9,'slide',S.bs);S.headTier='MISS';}}
+function wipeCovered(w){for(const[id,p]of pointers){if(p.ownerSlideId!==null)continue;if(Math.abs(p.x-w.x)<=hitHalfW(w.w))return true;}return false;}
+function clearWipe(w){addJudge('BEST',0,'wipe',w.bs);J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);fxPush(w.x,w.w,'wipe');w.state='cleared';w.ptr=-1;}
+function processPointerInput(ev){
+  const p=pointers.get(ev.id);if(!p)return;
+  const judgeMs=judgeNowFromAudio(ev.t),x255=p.x;
+  if(ev.kind==='down'){
+    let nearT=null,nearDt=1e9;for(const n of chart.taps){if(n.state)continue;const dt=judgeMs-noteJudgeTime(n.t);if(Math.abs(dt)<Math.abs(nearDt)){nearDt=dt;nearT=n;}}
+    if(nearT){const y=yOfRaw(nearT.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);dbgTouch={sx:ev.sx.toFixed(0),dt:Math.round(nearDt),dx:Math.round(xx-nearT.x),w:nearT.w,y:y.toFixed(0)};}else dbgTouch={sx:ev.sx.toFixed(0),dt:null,dx:null,w:null,y:null};
+    const tap=nearestTap(ev.sx,judgeMs),head=nearestSlideHead(ev.sx,judgeMs),wipe=cfg.suck?wipeCandidate(judgeMs,x255):null;
+    const cands=[];if(tap)cands.push({kind:'tap',obj:tap,d:Math.abs(judgeMs-noteJudgeTime(tap.t))});if(head)cands.push({kind:'head',obj:head,d:Math.abs(judgeMs-noteJudgeTime(head.t0))});if(wipe)cands.push({kind:'wipe',obj:wipe,d:judgeMs-noteJudgeTime(wipe.t)});
+    cands.sort((a,b)=>a.d-b.d||(a.kind==='tap'?0:a.kind==='head'?1:2)-(b.kind==='tap'?0:b.kind==='head'?1:2));
+    const discrete=cands.filter(c=>c.kind==='tap'||c.kind==='head');const nearestDiscrete=discrete.length?Math.min(...discrete.map(c=>c.d)):Infinity;
+    const chosen=cands[0];
+    if(wipe && (chosen===undefined || (chosen.kind!=='wipe' && (judgeMs-noteJudgeTime(wipe.t))<nearestDiscrete))){clearWipe(wipe);return;}
+    if(chosen){
+      if(chosen.kind==='tap'){if(judgeHit(chosen.obj,judgeMs-noteJudgeTime(chosen.obj.t),'tap'))chosen.obj.state=1;return;}
+      if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
+    }
+    catchSlideBody(judgeMs,x255,ev.id);
+  }else if(ev.kind==='move'){
+    if(p.ownerSlideId!==null){const S=chart.slides[p.ownerSlideId];if(S&&!S.finalized)S.followX=x255;return;}
+    catchSlideBody(judgeMs,x255,ev.id);
+  }else if(ev.kind==='up'){
+    const owner=p.ownerSlideId;if(owner!==null){const S=chart.slides[owner];if(S&&!S.finalized){if(S.ptr===ev.id)S.ptr=-1;S.noOwnerSince=judgeMs;S.state='active';}p.ownerSlideId=null;}
+    pointers.delete(ev.id);
   }
- }
- return false;
 }
-function failSlideBody(S){
- if(S.bodyFailed)return;
- S.bodyFailed=true;
- if(!S.headJudged){
-  S.headJudged=true;S.headTier='MISS';missNote(S,'slide');return;
- }
- if(S.headTier&&S.headTier!=='MISS'){
-  J.combo=0;
-  J.miss.push({kind:'slide',bs:S.bs,err:1e9});
-  lastJudge={tier:'MISS',t0:performance.now(),err:1e9};
- }
-}
-function clearWipe(w){const t=tierOf(w.entryErr)||'MISS';addJudge(t,w.entryErr,'wipe',w.bs);
- if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}
- fxPush(w.x,w.w,'wipe');w.state='cleared';w.ptr=-1;}
-/* onDown: wipe吸われを最優先し、その後にslide頭/tap、最後にslide途中再キャッチ */
-function onDown(ev){
- const p={sx:ev.sx,sy:ev.sy,x:laneX255(ev.sx,judgeY),y:ev.sy,down:true};
- pointers.set(ev.id,p);
- {
-  let nearT=null,nearDt=1e9;
-  for(const n of chart.taps){if(n.state)continue;const dt=ev.t-expectT(n.t);
-   if(Math.abs(dt)<Math.abs(nearDt)){nearDt=dt;nearT=n;}
-  }
-  if(nearT){
-   const y=yOfRaw(nearT.c,posNow(ev.t+cfg.gOff));
-   const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
-   dbgTouch={sx:ev.sx.toFixed(0),dt:Math.round(nearDt),dx:Math.round(xx-nearT.x),w:nearT.w,y:y.toFixed(0)};
-  }else dbgTouch={sx:ev.sx.toFixed(0),dt:null,dx:null,w:null,y:null};
- }
- const x255=p.x;
- if(tryHitWipe(ev.t,x255))return;
- const head=nearestSlideHead(ev.sx,ev.t),tap=nearestTap(ev.sx,ev.t),cands=[];
- if(head)cands.push({kind:'slideHead',obj:head,d:Math.abs(ev.t-expectT(head.t0))});
- if(tap)cands.push({kind:'tap',obj:tap,d:Math.abs(ev.t-expectT(tap.t))});
- cands.sort((a,b)=>a.d-b.d);
- if(cands.length){
-  const c=cands[0];
-  if(c.kind==='tap'){
-   if(judgeHit(c.obj,ev.t-expectT(c.obj.t),'tap'))c.obj.state=1;
-  }else{
-   judgeSlideHead(c.obj,ev.t);
-   c.obj.state='active';c.obj.ptr=ev.id;c.obj.followX=x255;c.obj.badSince=0;c.obj.released=false;
-   c.obj.cp=c.obj.nT.slice(1,-1).map((tt,i)=>({t:tt,x:c.obj.nX[i+1],w:c.obj.nW[i+1],seen:false}));
-   c.obj.cpIndex=0;c.obj.trail=[];
-  }
-  return;
- }
- tryCatchSlide(ev.t,x255,ev.id);
-}
-function onMove(ev){
- const p=pointers.get(ev.id);if(!p)return;
- p.sx=ev.sx;p.sy=ev.sy;p.x=laneX255(ev.sx,judgeY);
- const x255=p.x;
- if(tryHitWipe(ev.t,x255))return;
- let held=false;
- for(const S of chart.slides){
-  if(S.state==='active'&&S.ptr===ev.id){
-   const target=slideXAtTime(S,ev.t),ww=slideWAtTime(S,ev.t);
-   if(Math.abs(x255-target)<=hitHalfW(ww)){
-    S.badSince=0;S.followX=x255;
-    S.trail.push({x:x255,t:performance.now()});if(S.trail.length>40)S.trail.shift();
-    held=true;
-   }else{S.state='pending';S.ptr=-1;S.badSince=0;}
-  }
- }
- if(!held)tryCatchSlide(ev.t,x255,ev.id);
-}
-function onUp(ev){
- pointers.delete(ev.id);
- for(const S of chart.slides){
-  if(S.state==='active'&&S.ptr===ev.id){S.state='pending';S.ptr=-1;S.badSince=0;}
- }
-}
+function catchSlideBody(judgeMs,x255,ptrId){let best=null,bd=1e9;for(const S of chart.slides){if(S.finalized||S.state==='done')continue;const reqUntil=slideRequiredUntil(S);if(judgeMs<S.t0||judgeMs>=reqUntil)continue;const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs)),d=Math.abs(x255-target);if(d<=tol&&d<bd){if(S.ptr===-1||S.ptr===ptrId||S.ptr===-1&&(!pointers.get(ptrId)?.ownerSlideId)){bd=d;best=S;}}}
+if(!best)return false;ensureSlideCP(best);if(best.ptr!==ptrId)assignSlideOwner(best,ptrId,judgeMs);return true;}
+function onDown(ev){const p={sx:ev.sx,sy:ev.sy,x:laneX255(ev.sx,judgeY),y:ev.sy,down:true,ownerSlideId:null};pointers.set(ev.id,p);processPointerInput(ev);}
+function onMove(ev){const p=pointers.get(ev.id);if(!p)return;p.sx=ev.sx;p.sy=ev.sy;p.x=laneX255(ev.sx,judgeY);processPointerInput(ev);}
+function onUp(ev){const p=pointers.get(ev.id);if(!p)return;processPointerInput(ev);}
 /* ===== 論理ステップ ===== */
 function step(t){
- const tv=t+cfg.gOff;
- if(cfg.auto)autoPlay(tv);
- for(const w of chart.wipes){
-  if(w.state!=='pending')continue;
-  const et=expectT(w.t);
-  if(tv>et+WIN.miss){w.state='missed';missNote(w,'wipe');w.ptr=-1;}
- }
- for(const S of chart.slides){
-  if(!S.headJudged){
-   const et=expectT(S.t0);
-   if(tv>et+WIN.miss){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');}
+  const judgeMs=judgeNowFromAudio(t);
+  if(cfg.auto)autoPlay(judgeMs);
+  /* ===== wipe: 静的指でもBEST成立。ただしslide所有指は対象外 ===== */
+  for(const w of chart.wipes){if(w.state!=='pending')continue;const et=noteJudgeTime(w.t);if(judgeMs<et)continue;if(judgeMs>w.t+cfg.jOff+WIN.miss){w.state='missed';missNote(w,'wipe');continue;}if(judgeMs<=et+WIN.best&&wipeCovered(w)){w.entryErr=0;clearWipe(w);}}
+  /* ===== slide head miss ===== */
+  for(const S of chart.slides){if(!S.headJudged){const et=noteJudgeTime(S.t0);if(judgeMs>et+WIN.miss){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');}}}
+  /* ===== slide body ===== */
+  for(const S of chart.slides){
+    if(S.state==='done')continue;ensureSlideCP(S);if(judgeMs<S.t0)continue;
+    if(S.finalized){if(judgeMs>=S.end){if(S.success){S.state='done';fxPush(S.nX[S.nX.length-1],S.nW[S.nW.length-1],'slide');tracePulse(S.nX[S.nX.length-1],S.nW[S.nW.length-1],'end');}else S.state='missed';if(S.ptr!==-1){const p=pointers.get(S.ptr);if(p&&p.ownerSlideId===S.id)p.ownerSlideId=null;}S.ptr=-1;}continue;}
+    const reqUntil=slideRequiredUntil(S);
+    if(judgeMs>=reqUntil){
+      let success;
+      if(reqUntil<=S.t0+STEP){if(!S.headJudged){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');}success=S.headJudged&&S.headTier!=='MISS';}
+      else success=(S.avgOk|| (S.everOk&&judgeMs-S.lastOkTv<=80)) && S.headJudged && S.headTier!=='MISS';
+      S.finalized=true;S.success=!!success;
+      if(success){S.state='active';tracePulse(slideXAtTime(S,reqUntil),slideWAtTime(S,reqUntil),'free');}
+      else{S.state='missed';failSlideBody(S);}continue;
+    }
+    if(cfg.auto){pushSlideError(S,0);S.avgErr=0;S.avgOk=true;S.everOk=true;S.lastOkTv=judgeMs;S.state='active';S.ptr=S.id;S.noOwnerSince=0;continue;}
+    const pid=chooseSlidePointer(S,judgeMs);
+    if(pid!==null&&pointers.has(pid)){
+      if(S.ptr!==pid)assignSlideOwner(S,pid,judgeMs);
+      const p=pointers.get(pid);const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs));const err=p.x-target;pushSlideError(S,err);S.followX=p.x;S.trail.push({x:p.x,t:performance.now()});if(S.trail.length>40)S.trail.shift();const avg=S.buf.length?S.bufSum/S.buf.length:0;S.avgErr=avg;const ok=Math.abs(avg)<=tol;S.avgOk=ok;if(ok){S.everOk=true;S.lastOkTv=judgeMs;S.state='active';}else{if(!S.noOwnerSince)S.noOwnerSince=judgeMs;if(judgeMs-S.noOwnerSince>SLIDE_HANDOFF_GRACE_MS)S.state='missed';}
+      if(S.ptr!==-1){const op=pointers.get(S.ptr);if(op)op.ownerSlideId=S.id;}
+    }else{
+      if(S.ptr!==-1){const op=pointers.get(S.ptr);if(op&&op.ownerSlideId===S.id)op.ownerSlideId=null;S.ptr=-1;}
+      if(!S.noOwnerSince)S.noOwnerSince=judgeMs;
+      if(judgeMs-S.noOwnerSince>SLIDE_HANDOFF_GRACE_MS)S.state='missed';
+    }
+    while(S.cpIndex<S.cp.length&&judgeMs>=S.cp[S.cpIndex].t){const cp=S.cp[S.cpIndex];if(S.avgOk){cp.seen=true;fxPush(cp.x,cp.w,'slide');tracePulse(cp.x,cp.w,'checkpoint');}S.cpIndex++;}
   }
- }
- for(const S of chart.slides){
-  if(S.state==='done'||S.state==='missed')continue;
-  if(!cfg.auto&&S.state==='active'){
-   const p=pointers.get(S.ptr);
-   if(!p){S.state='pending';S.ptr=-1;S.badSince=0;}
-   else{
-    const target=slideXAtTime(S,tv),ww=slideWAtTime(S,tv);
-    if(Math.abs(p.x-target)>hitHalfW(ww)){S.state='pending';S.ptr=-1;S.badSince=0;}
-   }
-  }
-  while(S.cpIndex<S.cp.length&&tv>=S.cp[S.cpIndex].t){
-   const cp=S.cp[S.cpIndex],p=pointers.get(S.ptr);
-   if(S.state==='active'&&p&&Math.abs(p.x-cp.x)<=hitHalfW(cp.w)){
-    cp.seen=true;fxPush(cp.x,cp.w,'slide');tracePulse(cp.x,cp.w,'checkpoint');
-   }
-   S.cpIndex++;
-  }
-  if(tv>=S.end){
-   const p=pointers.get(S.ptr),lx=S.nX[S.nX.length-1],lw=S.nW[S.nW.length-1];
-   const ok=cfg.auto||(S.state==='active'&&p&&Math.abs(p.x-lx)<=hitHalfW(lw));
-   if(ok){S.state='done';S.ptr=-1;fxPush(lx,lw,'slide');tracePulse(lx,lw,'end');}
-   else{S.state='missed';S.ptr=-1;failSlideBody(S);}
-  }
- }
- while(tapSweep<chart.taps.length&&chart.taps[tapSweep].t<tv-WIN.miss){
-  const n=chart.taps[tapSweep];if(!n.state){n.state=1;missNote(n,'tap');}tapSweep++;
- }
- while(wipeSweep<chart.wipes.length&&chart.wipes[wipeSweep].t<tv-WIN.miss){
-  const w=chart.wipes[wipeSweep];if(w.state==='pending'||w.state==='tracking'){w.state='missed';missNote(w,'wipe');w.ptr=-1;}wipeSweep++;
- }
+  while(tapSweep<chart.taps.length&&chart.taps[tapSweep].t<judgeMs-WIN.miss){const n=chart.taps[tapSweep];if(!n.state){n.state=1;missNote(n,'tap');}tapSweep++;}
+  while(wipeSweep<chart.wipes.length&&chart.wipes[wipeSweep].t<judgeMs-WIN.miss){const w=chart.wipes[wipeSweep];if(w.state==='pending'||w.state==='tracking'){w.state='missed';missNote(w,'wipe');w.ptr=-1;}wipeSweep++;}
 }
-function autoPlay(tv){
- for(const n of chart.taps)if(!n.state&&tv>=n.t&&tv<=n.t+STEP){n.state=1;judgeHit(n,0,'tap');}
- for(const w of chart.wipes)if(w.state==='pending'&&tv>=expectT(w.t)){w.entryErr=0;clearWipe(w);}
- for(const S of chart.slides){
-  if(!S.headJudged&&tv>=expectT(S.t0)){
-   S.headJudged=true;S.headTier='BEST';addJudge('BEST',0,'slide',S.bs);J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);
-   fxPush(S.nX[0],S.nW[0],'slide');
-  }
-  if(S.state!=='done'&&S.state!=='missed')S.state=tv>=S.end?'done':(tv>=S.t0?'active':'pending');
-  if(S.state==='done')S.ptr=-1;
- }
+function autoPlay(judgeMs){
+  for(const n of chart.taps)if(!n.state&&judgeMs>=n.t&&judgeMs<=n.t+STEP){n.state=1;judgeHit(n,0,'tap');}
+  for(const w of chart.wipes)if(w.state==='pending'&&judgeMs>=noteJudgeTime(w.t)){w.entryErr=0;clearWipe(w);}
+  for(const S of chart.slides){if(!S.headJudged&&judgeMs>=noteJudgeTime(S.t0))judgeSlideHead(S,noteJudgeTime(S.t0));if(!S.finalized&&judgeMs>=S.t0){S.state='active';S.ptr=S.id;S.everOk=true;S.avgOk=true;S.avgErr=0;S.lastOkTv=judgeMs;}}
 }
 /* ===== エフェクト: ノーツ幅の角丸長方形（円形なし） ===== */
 function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);
@@ -492,7 +375,9 @@ ctx.lineTo(cx+w/2,y+th/2);ctx.lineTo(cx-w/2,y+th/2);ctx.closePath();ctx.fill();
 ctx.strokeStyle=kind==='wipe'?'rgba(255,240,170,.9)':'rgba(230,245,255,.9)';
 ctx.lineWidth=1.2;ctx.stroke();}
 function draw(nowMs){
-const now=nowMs+cfg.gOff;
+const drawMs=nowMs+cfg.gOff;
+const now=drawMs;
+const judgeDrawMs=nowMs+cfg.jOff;
 ctx.clearRect(0,0,W,H);
 if(bgImg){const s=Math.max(W/bgImg.width,H/bgImg.height);
 ctx.drawImage(bgImg,(W-bgImg.width*s)/2,(H-bgImg.height*s)/2,bgImg.width*s,bgImg.height*s);}
@@ -537,13 +422,12 @@ if(s.state==='done')continue;
 const y=yOf(s.nC[0],nowC);
 if(Number.isFinite(y)&&y>-60)slab(xAt(s.nX[0],y),y,s.nW[0]/255*fieldW(y),34*u2*scaleAtY(y),'tap');
 if(s.state==='active'){
-const p=pointers.get(s.ptr);
-if(p){
-  const px=laneX255(p.sx,judgeY),target=slideXAtTime(s,nowMs);
-  const on=Math.abs(px-target)<=trackHalfW(s.w);
-  drawSlideTrail(s);
-  traceRect(xAt(px,judgeY),s.w,on?(0.85+0.12*Math.sin(now/50)):0.22);
-}}
+  const target=slideXAtTime(s,judgeDrawMs),tw=slideWAtTime(s,judgeDrawMs);
+  const on=s.avgOk;
+  const p=s.ptr!==-1?pointers.get(s.ptr):null;
+  if(p){drawSlideTrail(s);}
+  traceRect(xAt(target,judgeY),tw,on?(0.85+0.12*Math.sin(performance.now()/50)):0.22);
+}
 }
 for(const n of chart.taps){if(n.state)continue;
 const y=yOf(n.c,nowC);if(!Number.isFinite(y)||y<-60)continue;
@@ -603,8 +487,8 @@ if(now>songEndMs()){clock.pause();showResult();}}
 function songEndMs(){return Math.max(chart.last+1500,(clock.buf?clock.buf.duration*1000:0));}
 function drawDbg(now){const s=chart.slides.find(s=>s.state==='active');
 document.getElementById('dbg').textContent=
-`now=${now.toFixed(1)} logic=${logicMs.toFixed(1)} fps=${fps} combo=${J.combo} ptr=${pointers.size}
-slide: ${s?`tx=${slideXAtTime(s,logicMs+cfg.gOff).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${trackHalfW(s.w).toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
+`audio=${now.toFixed(1)} judge=${judgeNowFromAudio(now).toFixed(1)} draw=${(now+cfg.gOff).toFixed(1)} fps=${fps} combo=${J.combo} ptr=${pointers.size} offset=${chart.chartOffset} speed=${cfg.speed}
+slide: ${s?`tx=${slideXAtTime(s,judgeNowFromAudio(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromAudio(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} cp=${s.cpIndex}/${s.cp.length}`:'-'}
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y}`:'(no touch yet)'}`;}
 /* ===== UI ===== */
 const $=id=>document.getElementById(id);
@@ -613,12 +497,10 @@ function resetRun(){J.combo=0;J.maxCombo=0;J.accSum=0;J.accN=0;
 J.counts={BEST:0,COOL:0,GOOD:0,MISS:0};J.miss.length=0;fx.length=0;lastJudge=null;
 logicMs=0;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();
 for(const n of chart.taps)n.state=0;
-for(const w of chart.wipes){w.state='pending';w.ptr=-1;}
-for(const s of chart.slides){
- s.state='pending';s.ptr=-1;s.followX=0;s.badSince=0;s.nextTick=0;s.ticks=0;
- s.cp=[];s.cpIndex=0;s.trail=[];s.released=false;s.releasedX=0;s.startedCombo=false;
- s.headJudged=false;s.headTier=null;s.bodyFailed=false;
-}}
+for(const w of chart.wipes){w.state='pending';w.ptr=-1;w.entryErr=0;}
+for(const s of chart.slides){s.state='pending';s.ptr=-1;s.followX=0;s.noOwnerSince=0;s.nextTick=0;s.ticks=0;
+s.cp=[];s.cpIndex=0;s.cpInit=false;s.trail=[];s.startedCombo=false;
+s.headJudged=false;s.headTier=null;s.bodyFailed=false;s.buf=[];s.bufSum=0;s.avgErr=0;s.avgOk=false;s.everOk=false;s.lastOkTv=0;s.finalized=false;s.success=false;}}
 function startRun(){resetRun();clock.init();clock.ctx.resume().then(()=>{clock.play(0);
 show('load',false);show('pause',false);show('result',false);$('pauseBtn').style.display='block';
 $('dbg').style.display=cfg.dbg?'block':'none';syncPauseControls();});}
@@ -644,21 +526,21 @@ cfg[key]=num?parseFloat(e.target.value):e.target.checked;
 if(key==='lead'||key==='speed')resize();
 if(key==='dbg')$('dbg').style.display=cfg.dbg?'block':'none';});
 bind('sJOff','jOff',1);bind('sGOff','gOff',1);bind('sSpeed','speed',1);bind('sLead','lead',1);
-bind('sAuto','auto');bind('sEff','eff');bind('sTrace','trace');bind('sSuck','suck');
+bind('sAuto','auto');bind('sEff','eff');bind('sSuck','suck');
 bind('sStartC','startC');bind('sDbg','dbg');
 function syncPauseControls(){
-$('pSpeed').value=cfg.speed; $('pSpeedVal').textContent=cfg.speed.toFixed(2)+'x';
+$('pSpeed').value=cfg.speed; $('pSpeedVal').textContent=cfg.speed.toFixed(0)+'x';
 $('pGOff').value=cfg.gOff; $('pGOffVal').textContent=Math.round(cfg.gOff)+' ms';
 $('pJOff').value=cfg.jOff; $('pJOffVal').textContent=Math.round(cfg.jOff)+' ms';}
 $('pSpeed').addEventListener('input',e=>{cfg.speed=parseFloat(e.target.value);
-$('pSpeedVal').textContent=cfg.speed.toFixed(2)+'x';resize();});
+$('pSpeedVal').textContent=cfg.speed.toFixed(0)+'x';resize();});
 $('pGOff').addEventListener('input',e=>{cfg.gOff=parseFloat(e.target.value);
 $('pGOffVal').textContent=Math.round(cfg.gOff)+' ms';});
 $('pJOff').addEventListener('input',e=>{cfg.jOff=parseFloat(e.target.value);
 $('pJOffVal').textContent=Math.round(cfg.jOff)+' ms';});
 function loadFile(f){const n=f.name.toLowerCase();
-if(n.endsWith('.mc')||n.endsWith('.json'))f.text().then(t=>{chart=buildChart(JSON.parse(t));resize();
-$('loadMsg').textContent=`譜面OK taps=${chart.taps.length} wipes=${chart.wipes.length} slides=${chart.slides.length}`;})
+if(n.endsWith('.mc')||n.endsWith('.json'))f.text().then(t=>{t=t.replace(/^\uFEFF/,'').trim();chart=buildChart(JSON.parse(t));resize();
+$('loadMsg').textContent=`譜面OK taps=${chart.taps.length} wipes=${chart.wipes.length} slides=${chart.slides.length} offset=${chart.chartOffset}ms`;})
 .catch(()=>{$('loadMsg').textContent='譜面の解析に失敗しました(JSON不正)';});
 else if(/\.(ogg|m4a|mp3|wav)$/.test(n))f.arrayBuffer().then(b=>{clock.init();
 return clock.ctx.decodeAudioData(b);})
