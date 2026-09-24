@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v13 (復活バグ修正+resolved内訳版)</title>
+<title>Malody Slide Test Player v14 (時間+位置スコア方式)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
@@ -342,10 +342,13 @@ const slideHeadY=(s,msVis)=>yOfRaw(s.nC[0],posNow(msVis));
 /* ===== 統一入力調停 ===== */
 function lowerTaps(t){let lo=0,hi=chart.taps.length;while(lo<hi){const m=(lo+hi)>>1;if(chart.taps[m].t<t)lo=m+1;else hi=m;}return lo;}
 function nearestTap(sx,judgeMs){const a=lowerTaps(judgeMs-WIN.miss-400);let best=null,bd=1e9;
-for(let i=a;i<chart.taps.length;i++){const n=chart.taps[i];if(n.state)continue;const et=noteJudgeTime(n.t);if(et>judgeMs+WIN.miss)break;if(judgeMs<et-WIN.miss||n.state)continue;const y=yOfRaw(n.c,posNow(judgeMs));const x=laneX255(sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);if(Math.abs(x-n.x)>hitHalfW(n.w))continue;const d=Math.abs(judgeMs-et);if(d<bd){bd=d;best=n;}}
+for(let i=a;i<chart.taps.length;i++){const n=chart.taps[i];if(n.state)continue;const et=noteJudgeTime(n.t);if(et>judgeMs+WIN.miss)break;if(judgeMs<et-WIN.miss||n.state)continue;const y=yOfRaw(n.c,posNow(judgeMs));const x=laneX255(sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);const hw=hitHalfW(n.w);if(Math.abs(x-n.x)>hw)continue;
+/* 時間だけでなく位置も正規化して合算したスコアで選ぶ。時間だけで選ぶと、複数指が近い時刻の
+ * 別々のノーツを同時に狙った際に取り違え(二重取り合い)が起きやすいため */
+const score=Math.abs(judgeMs-et)/WIN.miss+Math.abs(x-n.x)/hw;if(score<bd){bd=score;best=n;}}
 return best;}
 function nearestSlideHead(sx,judgeMs){const x=laneX255(sx,judgeY);let best=null,bd=1e9;
-for(const S of chart.slides){if(S.headJudged)continue;const et=noteJudgeTime(S.t0);if(judgeMs<et-WIN.miss||judgeMs>et+WIN.miss)continue;if(Math.abs(x-S.nX[0])>hitHalfW(S.nW[0]))continue;const d=Math.abs(judgeMs-et);if(d<bd){bd=d;best=S;}}
+for(const S of chart.slides){if(S.headJudged)continue;const et=noteJudgeTime(S.t0);if(judgeMs<et-WIN.miss||judgeMs>et+WIN.miss)continue;const hw=hitHalfW(S.nW[0]);if(Math.abs(x-S.nX[0])>hw)continue;const score=Math.abs(judgeMs-et)/WIN.miss+Math.abs(x-S.nX[0])/hw;if(score<bd){bd=score;best=S;}}
 return best;}
 function wipeCandidate(judgeMs,x255){let best=null,bd=1e9;for(const w of chart.wipes){if(w.state!=='pending')continue;const et=noteJudgeTime(w.t);if(judgeMs<et||judgeMs>et+WIN.best)continue;if(Math.abs(x255-w.x)>hitHalfW(w.w))continue;const d=judgeMs-et;if(d<bd){bd=d;best=w;}}return best;}
 function ensureSlideCP(S){if(S.cpInit)return;S.cp=S.nT.slice(1,-1).map((tt,i)=>({t:tt,x:S.nX[i+1],w:S.nW[i+1],seen:false}));S.cpIndex=0;S.cpInit=true;}
@@ -391,25 +394,27 @@ function tallyDown(r){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;retur
  * tol:      時間窓内にノーツはあったが、位置が許容範囲(tol/hitHalfW)をわずかに外れていた
  * empty:    そもそも時間窓内に候補ノーツが一つも無かった */
 function diagnoseNone(judgeMs,ev,x255){
-  let withinTimeUnresolved=false,resolvedHit=false,resolvedMiss=false,resolvedSlide=false,minMargin=Infinity;
+  let anyBug=false,resolvedHit=false,resolvedMiss=false,resolvedSlide=false,anyTol=false,minMargin=Infinity;
   for(const n of chart.taps){const et=noteJudgeTime(n.t);if(Math.abs(judgeMs-et)>WIN.miss)continue;
     const y=yOfRaw(n.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
     const margin=Math.abs(xx-n.x)-hitHalfW(n.w);
-    if(n.state===1){resolvedHit=true;continue;}
-    if(n.state===2){resolvedMiss=true;continue;}
-    withinTimeUnresolved=true;if(margin<minMargin)minMargin=margin;}
+    if(margin<=0){ /* 時間・位置とも本来当たるべき候補 */
+      if(n.state===1)resolvedHit=true;else if(n.state===2)resolvedMiss=true;else anyBug=true;
+    }else if(!n.state){anyTol=true;if(margin<minMargin)minMargin=margin;}
+  }
   for(const S of chart.slides){const reqUntil=slideRequiredUntil(S);if(judgeMs<S.t0||judgeMs>=reqUntil)continue;
     const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs));const margin=Math.abs(x255-target)-tol;
-    if(S.finalized||S.state==='done'){resolvedSlide=true;continue;}
-    withinTimeUnresolved=true;if(margin<minMargin)minMargin=margin;}
-  if(withinTimeUnresolved){
-    if(minMargin<=0)dbgStats.noneCause.bug++;
-    else{dbgStats.noneCause.tol++;dbgStats.noneTolSum+=minMargin;dbgStats.noneTolN++;}
-  }else if(resolvedHit||resolvedMiss||resolvedSlide){
+    const done=S.finalized||S.state==='done';
+    if(margin<=0){if(done)resolvedSlide=true;else anyBug=true;}
+    else if(!done){anyTol=true;if(margin<minMargin)minMargin=margin;}
+  }
+  if(anyBug)dbgStats.noneCause.bug++;
+  else if(resolvedHit||resolvedMiss||resolvedSlide){
     if(resolvedHit)dbgStats.noneCause.resolvedHit++;
     if(resolvedMiss)dbgStats.noneCause.resolvedMiss++;
     if(resolvedSlide)dbgStats.noneCause.resolvedSlide++;
-  }else dbgStats.noneCause.empty++;
+  }else if(anyTol){dbgStats.noneCause.tol++;dbgStats.noneTolSum+=minMargin;dbgStats.noneTolN++;}
+  else dbgStats.noneCause.empty++;
 }
 function processPointerInput(ev){
   const p=pointers.get(ev.id);if(!p)return;
