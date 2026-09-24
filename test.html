@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v10 (診断ログ詳細版)</title>
+<title>Malody Slide Test Player v11 (none原因分析版)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
@@ -231,7 +231,7 @@ let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化する�
  * missNoEvt: MISS確定の瞬間、直近200ms以内に実イベントが1つも来ていなかった回数
  *            →この値が大きいほど「アプリの判定ミスではなく、Safariがタッチ自体を配送していない」証拠になる
  * missWithEvt: MISS確定の瞬間、直近200ms以内に実イベントが来ていた回数(配送はされたが判定に乗らなかった)*/
-const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{}};
+const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{},noneCause:{resolved:0,bug:0,tol:0,empty:0},noneTolSum:0,noneTolN:0};
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 function screenPoint(e){const r=cv.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
 function eventPerfMs(e){
@@ -364,6 +364,28 @@ function failSlideBody(S){if(S.bodyFailed)return;S.bodyFailed=true;if(!S.headJud
 function wipeCovered(w){for(const[id,p]of pointers){if(Math.abs(p.x-w.x)<=hitHalfW(w.w))return true;}return false;}
 function clearWipe(w){addJudge('BEST',0,'wipe',w.bs);J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);fxPush(w.x,w.w,'wipe');w.state='cleared';w.ptr=-1;}
 function tallyDown(r){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;return r;}
+/* 'none'になった原因を4種に分類する診断:
+ * resolved: 時間・位置とも条件を満たすノーツはあったが、既に他の入力で消費済みだった(state済み/finalized済み)
+ * bug:      時間・位置とも条件を満たす未消費ノーツがあったのに、本来のロジックでは拾えなかった(=本物のバグ)
+ * tol:      時間窓内にノーツはあったが、位置が許容範囲(tol/hitHalfW)をわずかに外れていた
+ * empty:    そもそも時間窓内に候補ノーツが一つも無かった(人間側のタイミングミスの可能性が高い) */
+function diagnoseNone(judgeMs,ev,x255){
+  let withinTimeUnresolved=false,withinTimeResolved=false,minMargin=Infinity;
+  for(const n of chart.taps){const et=noteJudgeTime(n.t);if(Math.abs(judgeMs-et)>WIN.miss)continue;
+    const y=yOfRaw(n.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
+    const margin=Math.abs(xx-n.x)-hitHalfW(n.w);
+    if(n.state){withinTimeResolved=true;continue;}
+    withinTimeUnresolved=true;if(margin<minMargin)minMargin=margin;}
+  for(const S of chart.slides){const reqUntil=slideRequiredUntil(S);if(judgeMs<S.t0||judgeMs>=reqUntil)continue;
+    const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs));const margin=Math.abs(x255-target)-tol;
+    if(S.finalized||S.state==='done'){withinTimeResolved=true;continue;}
+    withinTimeUnresolved=true;if(margin<minMargin)minMargin=margin;}
+  if(withinTimeUnresolved){
+    if(minMargin<=0)dbgStats.noneCause.bug++;
+    else{dbgStats.noneCause.tol++;dbgStats.noneTolSum+=minMargin;dbgStats.noneTolN++;}
+  }else if(withinTimeResolved)dbgStats.noneCause.resolved++;
+  else dbgStats.noneCause.empty++;
+}
 function processPointerInput(ev){
   const p=pointers.get(ev.id);if(!p)return;
   const judgeMs=judgeNowFromChart(ev.t),x255=p.x;
@@ -381,6 +403,7 @@ function processPointerInput(ev){
       if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);dbgTouch.result=tier?'head-hit':'head-outofwindow';tallyDown(dbgTouch.result);if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
     }
     dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id)?'slidebody':'none';tallyDown(dbgTouch.result);
+    if(dbgTouch.result==='none')diagnoseNone(judgeMs,ev,x255);
   }else if(ev.kind==='move'){
     if(p.ownerSlideId!==null){
       if(cfg.suck){
@@ -645,7 +668,8 @@ slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.f
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y} held=${dbgTouch.held} result=${dbgTouch.result}`:'(no touch yet)'}
 diag: realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
 missByKind: ${JSON.stringify(dbgStats.missByKind)}
-downResult: ${JSON.stringify(dbgStats.downResult)}`;}
+downResult: ${JSON.stringify(dbgStats.downResult)}
+noneCause: ${JSON.stringify(dbgStats.noneCause)} avgTolOvershoot=${dbgStats.noneTolN?(dbgStats.noneTolSum/dbgStats.noneTolN).toFixed(1):'-'}`;}
 /* ===== UI ===== */
 const $=id=>document.getElementById(id);
 const show=(id,on)=>$(id).classList.toggle('hide',!on);
