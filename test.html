@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v12 (MISS復活ロジック入り)</title>
+<title>Malody Slide Test Player v13 (復活バグ修正+resolved内訳版)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
@@ -231,7 +231,7 @@ let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化する�
  * missNoEvt: MISS確定の瞬間、直近200ms以内に実イベントが1つも来ていなかった回数
  *            →この値が大きいほど「アプリの判定ミスではなく、Safariがタッチ自体を配送していない」証拠になる
  * missWithEvt: MISS確定の瞬間、直近200ms以内に実イベントが来ていた回数(配送はされたが判定に乗らなかった)*/
-const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{},noneCause:{resolved:0,bug:0,tol:0,empty:0},noneTolSum:0,noneTolN:0,revived:0};
+const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{},noneCause:{resolvedHit:0,resolvedMiss:0,resolvedSlide:0,bug:0,tol:0,empty:0},noneTolSum:0,noneTolN:0,revived:0};
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 function screenPoint(e){const r=cv.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
 function eventPerfMs(e){
@@ -368,7 +368,7 @@ function clearWipe(w){addJudge('BEST',0,'wipe',w.bs);J.combo++;J.maxCombo=Math.m
  * 「本当はちゃんと押していた」とみなしてMISSを取り消しHITとして復活させる。state===2(見切りMISS)
  * のみ対象。state===1(既にHIT済み)は絶対に対象にしない。 */
 function reviveTapMiss(n,err){
-  const tier=tierOf(err);if(!tier)return false;
+  const tier=tierOf(err);if(!tier||tier==='MISS')return false; /* MISS圏内の復活はcomboを不正に加算するバグだったため除外 */
   J.counts.MISS=Math.max(0,J.counts.MISS-1);J.accN=Math.max(0,J.accN-1);
   for(let i=J.miss.length-1;i>=0;i--){if(J.miss[i].kind==='tap'&&J.miss[i].bs===n.bs){J.miss.splice(i,1);break;}}
   J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);
@@ -383,27 +383,33 @@ function tryReviveTap(judgeMs,ev,x255){
   return reviveTapMiss(best,judgeMs-noteJudgeTime(best.t));
 }
 function tallyDown(r){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;return r;}
-/* 'none'になった原因を4種に分類する診断:
- * resolved: 時間・位置とも条件を満たすノーツはあったが、既に他の入力で消費済みだった(state済み/finalized済み)
+/* 'none'になった原因を分類する診断:
+ * resolvedHit:  そのタップは既に別の入力(別の指など)に「先取り」されて成功済みだった(=二重取り合い)
+ * resolvedMiss: state=2(見切りMISS)のノーツがあったのに復活処理が拾えなかった(=復活ロジック側の見落とし)
+ * resolvedSlide:候補スライドは既にfinalized/done済みだった
  * bug:      時間・位置とも条件を満たす未消費ノーツがあったのに、本来のロジックでは拾えなかった(=本物のバグ)
  * tol:      時間窓内にノーツはあったが、位置が許容範囲(tol/hitHalfW)をわずかに外れていた
- * empty:    そもそも時間窓内に候補ノーツが一つも無かった(人間側のタイミングミスの可能性が高い) */
+ * empty:    そもそも時間窓内に候補ノーツが一つも無かった */
 function diagnoseNone(judgeMs,ev,x255){
-  let withinTimeUnresolved=false,withinTimeResolved=false,minMargin=Infinity;
+  let withinTimeUnresolved=false,resolvedHit=false,resolvedMiss=false,resolvedSlide=false,minMargin=Infinity;
   for(const n of chart.taps){const et=noteJudgeTime(n.t);if(Math.abs(judgeMs-et)>WIN.miss)continue;
     const y=yOfRaw(n.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
     const margin=Math.abs(xx-n.x)-hitHalfW(n.w);
-    if(n.state){withinTimeResolved=true;continue;}
+    if(n.state===1){resolvedHit=true;continue;}
+    if(n.state===2){resolvedMiss=true;continue;}
     withinTimeUnresolved=true;if(margin<minMargin)minMargin=margin;}
   for(const S of chart.slides){const reqUntil=slideRequiredUntil(S);if(judgeMs<S.t0||judgeMs>=reqUntil)continue;
     const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs));const margin=Math.abs(x255-target)-tol;
-    if(S.finalized||S.state==='done'){withinTimeResolved=true;continue;}
+    if(S.finalized||S.state==='done'){resolvedSlide=true;continue;}
     withinTimeUnresolved=true;if(margin<minMargin)minMargin=margin;}
   if(withinTimeUnresolved){
     if(minMargin<=0)dbgStats.noneCause.bug++;
     else{dbgStats.noneCause.tol++;dbgStats.noneTolSum+=minMargin;dbgStats.noneTolN++;}
-  }else if(withinTimeResolved)dbgStats.noneCause.resolved++;
-  else dbgStats.noneCause.empty++;
+  }else if(resolvedHit||resolvedMiss||resolvedSlide){
+    if(resolvedHit)dbgStats.noneCause.resolvedHit++;
+    if(resolvedMiss)dbgStats.noneCause.resolvedMiss++;
+    if(resolvedSlide)dbgStats.noneCause.resolvedSlide++;
+  }else dbgStats.noneCause.empty++;
 }
 function processPointerInput(ev){
   const p=pointers.get(ev.id);if(!p)return;
