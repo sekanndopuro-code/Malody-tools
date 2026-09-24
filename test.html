@@ -2,11 +2,14 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v14 (時間+位置スコア方式)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Malody Slide Test Player v15 (判定Y統一・入力診断)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
--webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
+-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;font-family:system-ui,sans-serif;color:#dde}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
 .ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
 justify-content:center;background:rgba(8,8,12,.86);z-index:10;padding:16px;box-sizing:border-box}
@@ -55,6 +58,7 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <div class="row"><label><input type="checkbox" id="sSuck" checked> wipe吸われ</label></div>
 <div class="row"><label><input type="checkbox" id="sStartC" checked> slide開始をコンボに数える</label>
 <label><input type="checkbox" id="sDbg"> デバッグ</label></div>
+<div class="row"><label><input type="checkbox" id="sFlat"> 2Dモード(レーンの傾き無し / デバッグ用)</label></div>
 </details>
 <div class="row"><button id="btnPlay">PLAY</button></div>
 <div style="color:#889;font-size:11px">mc+音楽必須 / 背景任意 / D&D対応 / 判定C固定 / Space=pause<br>タイミングオフセットは譜面表示と判定を同時に動かします<br>
@@ -73,6 +77,7 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 <div class="pauseHead"><label for="pTOff">タイミングオフセット</label><output id="pTOffVal">0 ms</output></div>
 <input type="range" id="pTOff" min="-300" max="300" step="5" value="0">
 </div>
+<div class="pauseCtrl"><label><input type="checkbox" id="pFlat"> 2Dモード(レーンの傾き無し)</label></div>
 <button id="btnResume">RESUME</button><button id="btnRetry" class="sub">RETRY</button>
 <button id="btnQuit" class="sub">QUIT</button></div></div>
 <div id="result" class="ov hide"><div class="panel"><h2>RESULT</h2>
@@ -86,7 +91,7 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 const WIN={best:36,cool:76,good:110,miss:150}, ACCW={BEST:100,COOL:75,GOOD:40,MISS:0};
 const STEP=1000/60, TICK=100, AUTO=-999, INPUT_SLOP=2.5, SLIDE_TRAIL_MS=260;
 const SLIDE_TAIL_FREE_MS=200, SLIDE_BUF_SIZE=20, SLIDE_HANDOFF_GRACE_MS=120;
-const cfg={tOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false};
+const cfg={tOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false,flat:false};
 /* ===== 譜面パース ===== */
 const beatF=b=>b[0]+b[1]/(b[2]||1), beatStr=b=>b[2]===1?`${b[0]}`:`${b[0]}+${b[1]}/${b[2]}`;
 function buildTiming(a){const evs=(a||[]).filter(t=>t.bpm!==undefined)
@@ -222,7 +227,7 @@ addEventListener('touchstart',unlockAudioContext,{once:true,passive:true});
 addEventListener('pointerdown',unlockAudioContext,{once:true,passive:true});
 addEventListener('click',unlockAudioContext,{once:true,passive:true});
 /* ===== 入力 ===== */
-const pointers=new Map(); let queue=[];
+const pointers=new Map(); let queue=[],evSeq=0;
 const rawTouches=new Map(); /* id -> {x,y}: ブラウザから見て「今まさに触れている」生の状態をそのまま反映(判定・ゲーム状態とは無関係、遅延なし) */
 let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化するためのデバッグ情報 */
 /* ===== 入力診断: Safari側の生イベント欠落と、アプリ側のロジック欠落を切り分けるための計測 =====
@@ -231,9 +236,16 @@ let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化する�
  * missNoEvt: MISS確定の瞬間、直近200ms以内に実イベントが1つも来ていなかった回数
  *            →この値が大きいほど「アプリの判定ミスではなく、Safariがタッチ自体を配送していない」証拠になる
  * missWithEvt: MISS確定の瞬間、直近200ms以内に実イベントが来ていた回数(配送はされたが判定に乗らなかった)*/
-const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{},noneCause:{resolvedHit:0,resolvedMiss:0,resolvedSlide:0,bug:0,tol:0,empty:0},noneTolSum:0,noneTolN:0,revived:0};
+const tapRings=[]; /* タッチ開始の瞬間に必ず出す短命リング。down→upが1フレーム内で終わる高速タップでもドットが描かれない問題を避け、これすら出なければ本当にイベント未着と判断できる */
+const dbgStats={startEvt:0,cancelEvt:0,maxTouches:0,lagLast:0,lagMax:0,lagMaxAt:0,realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{},noneCause:{resolvedHit:0,resolvedMiss:0,resolvedSlide:0,bug:0,tol:0,empty:0},noneTolSum:0,noneTolN:0,revived:0};
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
-function screenPoint(e){const r=cv.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
+/* getBoundingClientRectはイベントごとに呼ばず、リサイズ/回転/スクロール時だけ取り直す(キャンバスは全画面固定) */
+let cvRect=null;
+function getCvRect(){return cvRect||(cvRect=cv.getBoundingClientRect());}
+const invalidateRect=()=>{cvRect=null;};
+addEventListener('resize',invalidateRect);addEventListener('orientationchange',invalidateRect);addEventListener('scroll',invalidateRect,{passive:true});
+if(window.visualViewport){visualViewport.addEventListener('resize',invalidateRect);visualViewport.addEventListener('scroll',invalidateRect);}
+function screenPoint(e){const r=getCvRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
 function eventPerfMs(e){
   const ts=Number(e.timeStamp),now=performance.now();
   let branch,result;
@@ -252,7 +264,7 @@ function pushEv(k,e){
   if(k==='down'||k==='move'){const q0=screenPoint(e);rawTouches.set(e.pointerId,{x:q0.sx,y:q0.sy});}
   else if(k==='up'){rawTouches.delete(e.pointerId);}
   if(clock.state!=='playing')return;const q=screenPoint(e);
-  queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t:eventSongMs(e)});}
+  queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t:eventSongMs(e),seq:++evSeq});}
 /* iOS SafariはPointer Events + setPointerCaptureの組み合わせで、既に1本指が
  * 押さえた状態のまま別の指でdownすると新しいpointerdownが発火しない(または
  * 判定に届かない)ことがある。タッチ対応環境では素のTouch Eventsを使い、
@@ -269,7 +281,7 @@ if(supportsTouch){
    * これにより、当該の指自身のイベントが飛んでこなくても、他の指のイベントを
    * きっかけに取りこぼしを検知・復旧できる。 */
   function syncTouches(te){
-    const rect=cv.getBoundingClientRect();
+    const rect=getCvRect();
     const seen=new Set();
     for(const t of te.touches){seen.add(t.identifier);if(!rawTouches.has(t.identifier)){dbgStats.synthDown++;pushEv('down',mk(te,t));}}
     for(const id of Array.from(rawTouches.keys())){
@@ -279,11 +291,20 @@ if(supportsTouch){
       pushEv('up',{pointerId:id,clientX:rect.left+(raw?raw.x:0),clientY:rect.top+(raw?raw.y:0),timeStamp:te.timeStamp});
     }
   }
-  const markReal=()=>{dbgStats.realEvt++;dbgStats.lastRealEventAt=performance.now();};
-  cv.addEventListener('touchstart',e=>{markReal();for(const t of e.changedTouches)pushEv('down',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchmove',e=>{markReal();for(const t of e.changedTouches)pushEv('move',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchend',e=>{markReal();for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchcancel',e=>{markReal();for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  const markReal=(te,type)=>{
+    const now=performance.now();dbgStats.realEvt++;dbgStats.lastRealEventAt=now;
+    if(type==='start')dbgStats.startEvt++;else if(type==='cancel')dbgStats.cancelEvt++;
+    dbgStats.maxTouches=Math.max(dbgStats.maxTouches,te.touches.length);
+    /* イベント発生時刻→JS到達までの遅延。大きければメインスレッド詰まり(=配送遅れ)の証拠 */
+    const ts=Number(te.timeStamp);
+    if(Number.isFinite(ts)&&Math.abs(ts-now)<10000){const lag=Math.max(0,now-ts);dbgStats.lagLast=lag;
+      if(lag>dbgStats.lagMax||now-dbgStats.lagMaxAt>5000){dbgStats.lagMax=lag;dbgStats.lagMaxAt=now;}}
+    if(type==='start'){const r=getCvRect();for(const t of te.changedTouches){tapRings.push({x:t.clientX-r.left,y:t.clientY-r.top,t0:now});}if(tapRings.length>16)tapRings.splice(0,tapRings.length-16);}
+  };
+  cv.addEventListener('touchstart',e=>{markReal(e,'start');for(const t of e.changedTouches)pushEv('down',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchmove',e=>{markReal(e,'move');for(const t of e.changedTouches)pushEv('move',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchend',e=>{markReal(e,'end');for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{markReal(e,'cancel');for(const t of e.changedTouches)pushEv('up',mk(e,t));syncTouches(e);e.preventDefault();},{passive:false});
 }else{
   cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
   cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
@@ -291,6 +312,7 @@ if(supportsTouch){
   cv.addEventListener('pointercancel',e=>{pushEv('up',e);e.preventDefault();},{passive:false});
 }
 cv.addEventListener('contextmenu',e=>e.preventDefault());
+['gesturestart','gesturechange','gestureend'].forEach(t=>document.addEventListener(t,e=>e.preventDefault(),{passive:false}));
 /* ===== 判定コア ===== */
 let chart=null,logicMs=null,tapSweep=0,wipeSweep=0,dbgTouch=null,dbgInput=null,dbgEventCount=0;
 const J={combo:0,maxCombo:0,accSum:0,accN:0,counts:{BEST:0,COOL:0,GOOD:0,MISS:0},miss:[]};
@@ -320,7 +342,7 @@ leadChart=cfg.lead/(60000/(chart?chart.mainBpm:220));
 perspB=fTop*leadChart/(visualSpeed()*(1-fTop));}
 addEventListener('resize',resize);
 const clamp01=v=>Math.max(0,Math.min(1,v));
-const scaleAtY=y=>clamp01((y-horizonY)/(judgeY-horizonY));
+const scaleAtY=y=>cfg.flat?1:clamp01((y-horizonY)/(judgeY-horizonY)); /* flat=2Dモード: レーン幅・ノーツ大きさは全高さで一定 */
 const laneMargin=()=>Math.max(8,Math.min(28,W*0.03));
 const fieldW=y=>Math.max(0,W-2*laneMargin())*scaleAtY(y);
 const xAt=(x255,y)=>W/2+(x255/255-0.5)*fieldW(y);
@@ -329,7 +351,8 @@ const posNow=chartMs=>{
   if(!chart)return 0;
   return cfg.eff?chartPosAtBeat(chart.eff,msToBeat(chart.tm,chartMs)):chartMs*chart.mainBpm/60000;
 };
-function yOfRaw(c,nowC){const dZ=(c-nowC);const den=perspB+dZ;if(den<=0.02)return NaN;
+function yOfRaw(c,nowC){const dZ=(c-nowC);
+if(cfg.flat){const y=judgeY-dZ*judgeY*visualSpeed()/Math.max(1e-6,leadChart);return Number.isFinite(y)?y:NaN;} /* 2D: 等速の直線スクロール */const den=perspB+dZ;if(den<=0.02)return NaN;
 const sc=perspB/den;const y=horizonY+(judgeY-horizonY)*sc;return Number.isFinite(y)?y:NaN;}
 function yOf(c,nowC){const y=yOfRaw(c,nowC);if(!Number.isFinite(y)||y>judgeY+2*u2)return NaN;return y;}
 function slideXAtTime(s,ms){const T=s.nT,X=s.nX,n=T.length;if(n===1)return X[0];if(ms<=T[0])return X[0];if(ms>=T[n-1])return X[n-1];
@@ -342,7 +365,7 @@ const slideHeadY=(s,msVis)=>yOfRaw(s.nC[0],posNow(msVis));
 /* ===== 統一入力調停 ===== */
 function lowerTaps(t){let lo=0,hi=chart.taps.length;while(lo<hi){const m=(lo+hi)>>1;if(chart.taps[m].t<t)lo=m+1;else hi=m;}return lo;}
 function nearestTap(sx,judgeMs){const a=lowerTaps(judgeMs-WIN.miss-400);let best=null,bd=1e9;
-for(let i=a;i<chart.taps.length;i++){const n=chart.taps[i];if(n.state)continue;const et=noteJudgeTime(n.t);if(et>judgeMs+WIN.miss)break;if(judgeMs<et-WIN.miss||n.state)continue;const y=yOfRaw(n.c,posNow(judgeMs));const x=laneX255(sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);const hw=hitHalfW(n.w);if(Math.abs(x-n.x)>hw)continue;
+for(let i=a;i<chart.taps.length;i++){const n=chart.taps[i];if(n.state)continue;const et=noteJudgeTime(n.t);if(et>judgeMs+WIN.miss)break;if(judgeMs<et-WIN.miss||n.state)continue;const x=laneX255(sx,judgeY); /* 指は判定ライン上を叩く。空中のノーツ高度でレーン幅を逆算しない */const hw=hitHalfW(n.w);if(Math.abs(x-n.x)>hw)continue;
 /* 時間だけでなく位置も正規化して合算したスコアで選ぶ。時間だけで選ぶと、複数指が近い時刻の
  * 別々のノーツを同時に狙った際に取り違え(二重取り合い)が起きやすいため */
 const score=Math.abs(judgeMs-et)/WIN.miss+Math.abs(x-n.x)/hw;if(score<bd){bd=score;best=n;}}
@@ -380,7 +403,7 @@ function reviveTapMiss(n,err){
 function tryReviveTap(judgeMs,ev,x255){
   let best=null,bd=1e9;
   for(const n of chart.taps){if(n.state!==2)continue;const et=noteJudgeTime(n.t);const dt=Math.abs(judgeMs-et);if(dt>WIN.miss)continue;
-    const y=yOfRaw(n.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
+    const xx=laneX255(ev.sx,judgeY);
     if(Math.abs(xx-n.x)>hitHalfW(n.w))continue;if(dt<bd){bd=dt;best=n;}}
   if(!best)return false;
   return reviveTapMiss(best,judgeMs-noteJudgeTime(best.t));
@@ -396,7 +419,7 @@ function tallyDown(r){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;retur
 function diagnoseNone(judgeMs,ev,x255){
   let anyBug=false,resolvedHit=false,resolvedMiss=false,resolvedSlide=false,anyTol=false,minMargin=Infinity;
   for(const n of chart.taps){const et=noteJudgeTime(n.t);if(Math.abs(judgeMs-et)>WIN.miss)continue;
-    const y=yOfRaw(n.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);
+    const xx=laneX255(ev.sx,judgeY);
     const margin=Math.abs(xx-n.x)-hitHalfW(n.w);
     if(margin<=0){ /* 時間・位置とも本来当たるべき候補 */
       if(n.state===1)resolvedHit=true;else if(n.state===2)resolvedMiss=true;else anyBug=true;
@@ -421,7 +444,7 @@ function processPointerInput(ev){
   const judgeMs=judgeNowFromChart(ev.t),x255=p.x;
   if(ev.kind==='down'){
     let nearT=null,nearDt=1e9;for(const n of chart.taps){if(n.state)continue;const dt=judgeMs-noteJudgeTime(n.t);if(Math.abs(dt)<Math.abs(nearDt)){nearDt=dt;nearT=n;}}
-    if(nearT){const y=yOfRaw(nearT.c,posNow(judgeMs));const xx=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);dbgTouch={sx:ev.sx.toFixed(0),dt:Math.round(nearDt),dx:Math.round(xx-nearT.x),w:nearT.w,y:y.toFixed(0),held:pointers.size,result:'?'};}else dbgTouch={sx:ev.sx.toFixed(0),dt:null,dx:null,w:null,y:null,held:pointers.size,result:'?'};
+    if(nearT){const y=yOfRaw(nearT.c,posNow(judgeMs));const xx=laneX255(ev.sx,judgeY);const xOld=laneX255(ev.sx,Number.isFinite(y)?Math.min(y,judgeY):judgeY);dbgTouch={sx:ev.sx.toFixed(0),dt:Math.round(nearDt),dx:Math.round(xx-nearT.x),dxOld:Math.round(xOld-nearT.x),w:nearT.w,y:y.toFixed(0),held:pointers.size,result:'?'};}else dbgTouch={sx:ev.sx.toFixed(0),dt:null,dx:null,w:null,y:null,held:pointers.size,result:'?'};
     const tap=nearestTap(ev.sx,judgeMs),head=nearestSlideHead(ev.sx,judgeMs),wipe=cfg.suck?wipeCandidate(judgeMs,x255):null;
     const cands=[];if(tap)cands.push({kind:'tap',obj:tap,d:Math.abs(judgeMs-noteJudgeTime(tap.t))});if(head)cands.push({kind:'head',obj:head,d:Math.abs(judgeMs-noteJudgeTime(head.t0))});if(wipe)cands.push({kind:'wipe',obj:wipe,d:judgeMs-noteJudgeTime(wipe.t)});
     cands.sort((a,b)=>a.d-b.d||(a.kind==='tap'?0:a.kind==='head'?1:2)-(b.kind==='tap'?0:b.kind==='head'?1:2));
@@ -646,6 +669,8 @@ rectFlash(xAt(f.x,judgeY),f.w,k,{tap:'#bfefff',wipe:'#ffe9a0',slide:'#aef'}[f.ki
    触れている間ずっと表示し続けるので、離していないのに消えたら=ブラウザ/OS側で取りこぼしている証拠になる */
 rawTouches.forEach(d=>{ctx.save();ctx.globalAlpha=0.85;ctx.fillStyle='hsl(28,50%,55%)';
 ctx.beginPath();ctx.arc(d.x,d.y,12*u2,0,Math.PI*2);ctx.fill();ctx.restore();});
+{const nowP=performance.now();for(let i=tapRings.length-1;i>=0;i--){const g=tapRings[i],k=(nowP-g.t0)/220;if(k>=1){tapRings.splice(i,1);continue;}
+ctx.save();ctx.globalAlpha=(1-k)*0.9;ctx.strokeStyle='hsl(28,90%,65%)';ctx.lineWidth=3*u2;ctx.beginPath();ctx.arc(g.x,g.y,(14+22*k)*u2,0,Math.PI*2);ctx.stroke();ctx.restore();}}
 if(lastJudge){const k=(performance.now()-lastJudge.t0)/500;
 if(k<1){ctx.save();ctx.translate(W/2,H*0.58);ctx.scale(0.55,1);
 ctx.globalAlpha=(1-k)*0.85;ctx.textAlign='center';
@@ -681,7 +706,7 @@ if(!chart){return;}
 if(clock.state!=='playing'){draw(clock.chartMs());return;}
 const now=clock.chartMs();
 if(logicMs===null)logicMs=now-STEP;
-queue.sort((a,b)=>a.t-b.t);let qi=0;
+queue.sort((a,b)=>(a.t-b.t)||(a.seq-b.seq));let qi=0;
 const consumeUntil=l=>{while(qi<queue.length&&queue[qi].t<l){const ev=queue[qi++];
 if(ev.kind==='down')onDown(ev);else if(ev.kind==='move')onMove(ev);else onUp(ev);}};
 if(queue.length&&queue[0].t<logicMs)consumeUntil(logicMs+0.001);
@@ -694,12 +719,12 @@ function songEndMs(){return Math.max(chart.last+1500,clock.bufferEndChartMs());}
 function drawDbg(now){const s=chart.slides.find(s=>s.state==='active');
 const inp=dbgInput;
 document.getElementById('dbg').textContent=
-`audio=${clock.audioMs().toFixed(1)} chart=${now.toFixed(1)} judge=${judgeNowFromChart(now).toFixed(1)} draw=${(now+cfg.tOff).toFixed(1)} logic=${(logicMs??0).toFixed(1)} fps=${fps} combo=${J.combo} ptr=${pointers.size} ev=${dbgEventCount} offset=${chart.chartOffset} clock=${clock.timingSource} perfToCtx=${clock.perfToCtxMs.toFixed(2)} speed=${cfg.speed}
+`audio=${clock.audioMs().toFixed(1)} chart=${now.toFixed(1)} judge=${judgeNowFromChart(now).toFixed(1)} draw=${(now+cfg.tOff).toFixed(1)} logic=${(logicMs??0).toFixed(1)} fps=${fps} mode=${cfg.flat?'2D':'3D'} combo=${J.combo} ptr=${pointers.size} ev=${dbgEventCount} offset=${chart.chartOffset} clock=${clock.timingSource} perfToCtx=${clock.perfToCtxMs.toFixed(2)} speed=${cfg.speed}
 input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} dx=${inp.x.toFixed(0)} dy=${inp.y.toFixed(0)}`:'(no input yet)'}
 ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} result=${dbgTs.result.toFixed(1)} diff=${(dbgTs.result-dbgTs.now).toFixed(1)}`:'(no event yet)'} dots=${rawTouches.size} inputMode=${supportsTouch?'touch':'pointer'}
 slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
-touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y} held=${dbgTouch.held} result=${dbgTouch.result}`:'(no touch yet)'}
-diag: realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
+touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) 旧dx=${dbgTouch.dxOld} y=${dbgTouch.y} held=${dbgTouch.held} result=${dbgTouch.result}`:'(no touch yet)'}
+diag: start=${dbgStats.startEvt} cancel=${dbgStats.cancelEvt} maxTouch=${dbgStats.maxTouches} lag=${dbgStats.lagLast.toFixed(0)}/${dbgStats.lagMax.toFixed(0)}ms(5s max) realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
 missByKind: ${JSON.stringify(dbgStats.missByKind)}
 downResult: ${JSON.stringify(dbgStats.downResult)}
 noneCause: ${JSON.stringify(dbgStats.noneCause)} avgTolOvershoot=${dbgStats.noneTolN?(dbgStats.noneTolSum/dbgStats.noneTolN).toFixed(1):'-'} revived=${dbgStats.revived}`;}
@@ -770,8 +795,11 @@ if(key==='tOff'){
 if(key==='dbg')$('dbg').style.display=cfg.dbg?'block':'none';});
 bind('sTOff','tOff',1);bind('sSpeed','speed',1);bind('sLead','lead',1);
 bind('sAuto','auto');bind('sEff','eff');bind('sSuck','suck');
-bind('sStartC','startC');bind('sDbg','dbg');
+bind('sStartC','startC');bind('sDbg','dbg');bind('sFlat','flat');
+$('sFlat').addEventListener('input',()=>{$('pFlat').checked=cfg.flat;});
+$('pFlat').addEventListener('input',e=>{cfg.flat=e.target.checked;$('sFlat').checked=cfg.flat;});
 function syncPauseControls(){
+$('pFlat').checked=cfg.flat;
 $('pSpeed').value=cfg.speed; $('pSpeedVal').textContent=cfg.speed.toFixed(0)+'x';
 $('pTOff').value=cfg.tOff; $('pTOffVal').textContent=Math.round(cfg.tOff)+' ms';}
 $('pSpeed').addEventListener('input',e=>{cfg.speed=parseFloat(e.target.value);
