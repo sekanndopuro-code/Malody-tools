@@ -455,7 +455,7 @@ function processPointerInput(ev){
       if(chosen.kind==='tap'){const ok=judgeHit(chosen.obj,judgeMs-noteJudgeTime(chosen.obj.t),'tap');dbgTouch.result=ok?'tap-hit':'tap-outofwindow';tallyDown(dbgTouch.result);if(ok)chosen.obj.state=1;return;}
       if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);dbgTouch.result=tier?'head-hit':'head-outofwindow';tallyDown(dbgTouch.result);if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
     }
-    dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id)?'slidebody':'none';tallyDown(dbgTouch.result);
+    dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id,true)?'slidebody':'none';tallyDown(dbgTouch.result);
     if(dbgTouch.result==='none'){
       if(tryReviveTap(judgeMs,ev,x255)){dbgTouch.result='tap-revived';tallyDown(dbgTouch.result);}
       else diagnoseNone(judgeMs,ev,x255);
@@ -470,13 +470,19 @@ function processPointerInput(ev){
       if(S&&!S.finalized)S.followX=x255;
       return;
     }
-    catchSlideBody(judgeMs,x255,ev.id);
+    catchSlideBody(judgeMs,x255,ev.id,false);
   }else if(ev.kind==='up'){
     const owner=p.ownerSlideId;if(owner!==null){const S=chart.slides[owner];if(S&&!S.finalized){if(S.ptr===ev.id)S.ptr=-1;S.noOwnerSince=judgeMs;S.state='active';}p.ownerSlideId=null;}
     pointers.delete(ev.id);
   }
 }
-function catchSlideBody(judgeMs,x255,ptrId){let best=null,bd=1e9;for(const S of chart.slides){if(S.finalized||S.state==='done')continue;const reqUntil=slideRequiredUntil(S);if(judgeMs<S.t0||judgeMs>=reqUntil)continue;const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs)),d=Math.abs(x255-target);if(d<=tol&&d<bd){if(S.ptr===-1||S.ptr===ptrId||S.ptr===-1&&(!pointers.get(ptrId)?.ownerSlideId)){bd=d;best=S;}}}
+function catchSlideBody(judgeMs,x255,ptrId,isDown){let best=null,bd=1e9;for(const S of chart.slides){if(S.finalized||S.state==='done')continue;const reqUntil=slideRequiredUntil(S);if(judgeMs<S.t0||judgeMs>=reqUntil)continue;const target=slideXAtTime(S,judgeMs),tol=slideTol(slideWAtTime(S,judgeMs)),d=Math.abs(x255-target);if(d<=tol&&d<bd){
+/* すり抜けバグ修正: 別の指(たとえば置きっぱなしの指)が既にこのスライドの所有権を握っていても、
+ * 「今まさに新しく置かれた指(down)」であればそれを最優先で奪い取れるようにする。
+ * moveイベント(指を止めたまま微小に動いた場合など)では従来通り、所有者なし(S.ptr===-1)の
+ * スライドしか奪えない。これにより、置きっぱなしの指が偶然掴んでいたスライドを
+ * 別の指のタップがすり抜ける問題を防ぐ。 */
+if(S.ptr===-1||S.ptr===ptrId||isDown){bd=d;best=S;}}}
 if(!best)return false;ensureSlideCP(best);if(best.ptr!==ptrId)assignSlideOwner(best,ptrId,judgeMs);return true;}
 function onDown(ev){const p={sx:ev.sx,sy:ev.sy,x:laneX255(ev.sx,judgeY),y:ev.sy,down:true,ownerSlideId:null};pointers.set(ev.id,p);processPointerInput(ev);}
 function onMove(ev){const p=pointers.get(ev.id);if(!p)return;p.sx=ev.sx;p.sy=ev.sy;p.x=laneX255(ev.sx,judgeY);processPointerInput(ev);}
