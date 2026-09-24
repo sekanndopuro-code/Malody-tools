@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Malody Slide Test Player v9 (診断ログ入り)</title>
+<title>Malody Slide Test Player v10 (診断ログ詳細版)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,sans-serif;color:#dde}
@@ -231,7 +231,7 @@ let dbgTs=null; /* eventPerfMsのタイムスタンプ解釈を可視化する�
  * missNoEvt: MISS確定の瞬間、直近200ms以内に実イベントが1つも来ていなかった回数
  *            →この値が大きいほど「アプリの判定ミスではなく、Safariがタッチ自体を配送していない」証拠になる
  * missWithEvt: MISS確定の瞬間、直近200ms以内に実イベントが来ていた回数(配送はされたが判定に乗らなかった)*/
-const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0};
+const dbgStats={realEvt:0,synthDown:0,synthUp:0,missNoEvt:0,missWithEvt:0,lastRealEventAt:0,missByKind:{},downResult:{}};
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 function screenPoint(e){const r=cv.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
 function eventPerfMs(e){
@@ -303,7 +303,8 @@ function noteJudgeTime(t){return t;}
 function addJudge(tier,err,kind,bs){J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;if(tier==='MISS'){J.combo=0;J.miss.push({kind,bs,err:Math.round(err)});}lastJudge={tier,t0:performance.now(),err};}
 function judgeHit(n,err,kind){const t=tierOf(err);if(!t)return false;addJudge(t,err,kind,n.bs);if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(n.x,n.w,kind==='wipe'?'wipe':'tap');return true;}
 function missNote(n,kind){
-  if(performance.now()-dbgStats.lastRealEventAt>200)dbgStats.missNoEvt++;else dbgStats.missWithEvt++;
+  if(performance.now()-dbgStats.lastRealEventAt>200)dbgStats.missNoEvt++;
+  else{dbgStats.missWithEvt++;dbgStats.missByKind[kind]=(dbgStats.missByKind[kind]||0)+1;}
   addJudge('MISS',1e9,kind,n.bs);}
 function fxPush(x,w,kind){if(fx.length>24)fx.shift();fx.push({x,w,kind,t0:performance.now()});}
 /* ===== 几何 ===== */
@@ -362,6 +363,7 @@ function judgeSlideHead(S,judgeMs){if(S.headJudged)return S.headTier;const et=no
 function failSlideBody(S){if(S.bodyFailed)return;S.bodyFailed=true;if(!S.headJudged){S.headJudged=true;S.headTier='MISS';missNote(S,'slide');return;}if(S.headTier&&S.headTier!=='MISS'){J.counts[S.headTier]=Math.max(0,J.counts[S.headTier]-1);J.accSum-=ACCW[S.headTier];J.accN=Math.max(0,J.accN-1);addJudge('MISS',1e9,'slide',S.bs);S.headTier='MISS';}}
 function wipeCovered(w){for(const[id,p]of pointers){if(Math.abs(p.x-w.x)<=hitHalfW(w.w))return true;}return false;}
 function clearWipe(w){addJudge('BEST',0,'wipe',w.bs);J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);fxPush(w.x,w.w,'wipe');w.state='cleared';w.ptr=-1;}
+function tallyDown(r){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;return r;}
 function processPointerInput(ev){
   const p=pointers.get(ev.id);if(!p)return;
   const judgeMs=judgeNowFromChart(ev.t),x255=p.x;
@@ -373,12 +375,12 @@ function processPointerInput(ev){
     cands.sort((a,b)=>a.d-b.d||(a.kind==='tap'?0:a.kind==='head'?1:2)-(b.kind==='tap'?0:b.kind==='head'?1:2));
     const discrete=cands.filter(c=>c.kind==='tap'||c.kind==='head');const nearestDiscrete=discrete.length?Math.min(...discrete.map(c=>c.d)):Infinity;
     const chosen=cands[0];
-    if(wipe && (chosen===undefined || (chosen.kind!=='wipe' && (judgeMs-noteJudgeTime(wipe.t))<nearestDiscrete))){dbgTouch.result='wipe-clear';clearWipe(wipe);return;}
+    if(wipe && (chosen===undefined || (chosen.kind!=='wipe' && (judgeMs-noteJudgeTime(wipe.t))<nearestDiscrete))){dbgTouch.result='wipe-clear';tallyDown(dbgTouch.result);clearWipe(wipe);return;}
     if(chosen){
-      if(chosen.kind==='tap'){const ok=judgeHit(chosen.obj,judgeMs-noteJudgeTime(chosen.obj.t),'tap');dbgTouch.result=ok?'tap-hit':'tap-outofwindow';if(ok)chosen.obj.state=1;return;}
-      if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);dbgTouch.result=tier?'head-hit':'head-outofwindow';if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
+      if(chosen.kind==='tap'){const ok=judgeHit(chosen.obj,judgeMs-noteJudgeTime(chosen.obj.t),'tap');dbgTouch.result=ok?'tap-hit':'tap-outofwindow';tallyDown(dbgTouch.result);if(ok)chosen.obj.state=1;return;}
+      if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);dbgTouch.result=tier?'head-hit':'head-outofwindow';tallyDown(dbgTouch.result);if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
     }
-    dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id)?'slidebody':'none';
+    dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id)?'slidebody':'none';tallyDown(dbgTouch.result);
   }else if(ev.kind==='move'){
     if(p.ownerSlideId!==null){
       if(cfg.suck){
@@ -641,7 +643,9 @@ input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toF
 ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} result=${dbgTs.result.toFixed(1)} diff=${(dbgTs.result-dbgTs.now).toFixed(1)}`:'(no event yet)'} dots=${rawTouches.size} inputMode=${supportsTouch?'touch':'pointer'}
 slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) y=${dbgTouch.y} held=${dbgTouch.held} result=${dbgTouch.result}`:'(no touch yet)'}
-diag: realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}`;}
+diag: realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
+missByKind: ${JSON.stringify(dbgStats.missByKind)}
+downResult: ${JSON.stringify(dbgStats.downResult)}`;}
 /* ===== UI ===== */
 const $=id=>document.getElementById(id);
 const show=(id,on)=>$(id).classList.toggle('hide',!on);
