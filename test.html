@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Malody Slide Test Player v17(dbg)</title>
+<title>Malody Slide Test Player v18(dbg2)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;font-family:system-ui,sans-serif;color:#dde}
@@ -47,7 +47,7 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <div id="dbg"></div>
 <div id="load" class="ov">
 <div class="panel">
-<h2>Malody Slide Test Player v17(dbg)</h2>
+<h2>Malody Slide Test Player v18(dbg2)</h2>
 <div class="row"><span class="fl">① 譜面ファイルを選択（.mc / .json）</span><input type="file" id="fMc"></div>
 <div class="row"><span class="fl">② 音楽ファイルを選択（.mp3 / .m4a / .ogg / .wav）</span><input type="file" id="fAu"></div>
 <div class="row"><span class="fl">③ 背景画像（任意: .jpg / .png）</span><input type="file" id="fBg"></div>
@@ -266,6 +266,8 @@ const STALE_LAG_MS=40;
 let lastFrameT=performance.now(), lagEma=8; /* lagEma: 「正常な」イベントの平均配送遅延(ms) */
 const idLastT=new Map(); /* pointerId -> 直近に積んだイベントのチャート時刻(同一指の順序逆転防止) */
 const dbgJ=[]; /* 直近イベントのジャーナル(デバッグ表示用) */
+let lastDownEv=null; /* 直近のdown(synth含む)。MISS発生時に「直前に指は置かれていたか」を追うための参照 */
+const dbgMissLog=[]; /* note MISS × 直近downの対応ログ: downがsynthだったか/どれだけ古かったか/timestampが補正されていたか */
 function stampToPerf(e,now){
   const ts=Number(e.timeStamp);let branch,result;
   if(!Number.isFinite(ts)){branch='invalid';result=NaN;}
@@ -293,7 +295,8 @@ function resolveEventPerf(e,arrive,multi){
   dbgTs.mode=mode;dbgTs.lag=lag;dbgTs.final=t;
   return{t,mode,lag};
 }
-function pushEv(k,e,arrive,multi){
+function pushEv(k,e,arrive,multi,meta){
+  meta=meta||{};
   if(arrive===undefined)arrive=performance.now();
   if(k==='down'||k==='move'){const q0=screenPoint(e);rawTouches.set(e.pointerId,{x:q0.sx,y:q0.sy});}
   else if(k==='up'){rawTouches.delete(e.pointerId);}
@@ -307,10 +310,15 @@ function pushEv(k,e,arrive,multi){
   /* qeはキューに積む実体そのもの。dbgJにも同じ参照を積んでおくことで、後から
    * processPointerInput側がqe.resultを埋めた時点でジャーナル表示にも反映される
    * (=1個のイベントを「到着→タイムスタンプ補正→キュー投入→消費→判定結果」まで
-   * 単一IDで追跡できる)。文字列化はdrawDbg側で毎フレーム行う。 */
+   * 単一IDで追跡できる)。文字列化はdrawDbg側で毎フレーム行う。
+   * synth/via/touches: そのdown/upがsyncTouches()による復元だった場合の由来情報
+   * (どのイベント種別をきっかけに検知したか、その瞬間ブラウザが認識していた指の数)。 */
   const qe={kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t,seq:++evSeq,arrive,rawTs:Number(e.timeStamp),
-    lag:r.lag,mode:r.mode,multi:!!multi,result:null,resolvedAt:null};
+    lag:r.lag,mode:r.mode,multi:!!multi,synth:!!meta.synth,via:meta.via||null,
+    touches:meta.touches??null,changedTouches:meta.changedTouches??null,
+    result:null,resolvedAt:null};
   queue.push(qe);
+  if(k==='down')lastDownEv=qe;
   if(cfg.dbg){dbgJ.push(qe);if(dbgJ.length>10)dbgJ.shift();}}
 /* iOS SafariはPointer Events + setPointerCaptureの組み合わせで、既に1本指が
  * 押さえた状態のまま別の指でdownすると新しいpointerdownが発火しない(または
@@ -330,12 +338,13 @@ if(supportsTouch){
   function syncTouches(te,arrive){
     const rect=getCvRect();
     const seen=new Set();
-    for(const t of te.touches){seen.add(t.identifier);if(!rawTouches.has(t.identifier)){dbgStats.synthDown++;pushEv('down',mk(te,t),arrive,true);}}
+    const meta={synth:true,via:te.type,touches:te.touches.length,changedTouches:te.changedTouches.length};
+    for(const t of te.touches){seen.add(t.identifier);if(!rawTouches.has(t.identifier)){dbgStats.synthDown++;pushEv('down',mk(te,t),arrive,true,meta);}}
     for(const id of Array.from(rawTouches.keys())){
       if(seen.has(id))continue;
       const raw=rawTouches.get(id);
       dbgStats.synthUp++;
-      pushEv('up',{pointerId:id,clientX:rect.left+(raw?raw.x:0),clientY:rect.top+(raw?raw.y:0),timeStamp:te.timeStamp},arrive,true);
+      pushEv('up',{pointerId:id,clientX:rect.left+(raw?raw.x:0),clientY:rect.top+(raw?raw.y:0),timeStamp:te.timeStamp},arrive,true,meta);
     }
   }
   const markReal=(te,type,now)=>{
@@ -349,10 +358,10 @@ if(supportsTouch){
     if(type==='start'){const r=getCvRect();for(const t of te.changedTouches){tapRings.push({x:t.clientX-r.left,y:t.clientY-r.top,t0:now});}if(tapRings.length>16)tapRings.splice(0,tapRings.length-16);}
   };
   /* 到着時刻は各ハンドラの先頭で1回だけ取る。multi=「他の指が既に触れている状態でのstart/end」= スタンプが古くなり得る */
-  cv.addEventListener('touchstart',e=>{const a=performance.now();markReal(e,'start',a);const multi=e.touches.length>e.changedTouches.length;for(const t of e.changedTouches)pushEv('down',mk(e,t),a,multi);syncTouches(e,a);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchmove',e=>{const a=performance.now();markReal(e,'move',a);for(const t of e.changedTouches)pushEv('move',mk(e,t),a,false);syncTouches(e,a);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchend',e=>{const a=performance.now();markReal(e,'end',a);const multi=e.touches.length>0;for(const t of e.changedTouches)pushEv('up',mk(e,t),a,multi);syncTouches(e,a);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchcancel',e=>{const a=performance.now();markReal(e,'cancel',a);for(const t of e.changedTouches)pushEv('up',mk(e,t),a,true);syncTouches(e,a);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchstart',e=>{const a=performance.now();markReal(e,'start',a);const multi=e.touches.length>e.changedTouches.length;const meta={synth:false,via:'touchstart',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('down',mk(e,t),a,multi,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchmove',e=>{const a=performance.now();markReal(e,'move',a);const meta={synth:false,via:'touchmove',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('move',mk(e,t),a,false,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchend',e=>{const a=performance.now();markReal(e,'end',a);const multi=e.touches.length>0;const meta={synth:false,via:'touchend',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('up',mk(e,t),a,multi,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{const a=performance.now();markReal(e,'cancel',a);const meta={synth:false,via:'touchcancel',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('up',mk(e,t),a,true,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
 }else{
   cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
   cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
@@ -373,8 +382,17 @@ function noteJudgeTime(t){return t;}
 function addJudge(tier,err,kind,bs){J.counts[tier]++;J.accSum+=ACCW[tier];J.accN++;if(tier==='MISS'){J.combo=0;J.miss.push({kind,bs,err:Math.round(err)});}lastJudge={tier,t0:performance.now(),err};}
 function judgeHit(n,err,kind){const t=tierOf(err);if(!t)return false;addJudge(t,err,kind,n.bs);if(t!=='MISS'){J.combo++;J.maxCombo=Math.max(J.maxCombo,J.combo);}fxPush(n.x,n.w,kind==='wipe'?'wipe':'tap');return true;}
 function missNote(n,kind){
-  if(performance.now()-dbgStats.lastRealEventAt>200)dbgStats.missNoEvt++;
+  const nowP=performance.now();
+  if(nowP-dbgStats.lastRealEventAt>200)dbgStats.missNoEvt++;
   else{dbgStats.missWithEvt++;dbgStats.missByKind[kind]=(dbgStats.missByKind[kind]||0)+1;}
+  if(cfg.dbg){
+    const ld=lastDownEv;
+    dbgMissLog.push({kind,bs:n.bs,noteT:Math.round(noteJudgeTime(n.t)),
+      downSeq:ld?ld.seq:null,downAgeMs:ld?Math.round(nowP-ld.arrive):null,
+      downSynth:ld?ld.synth:null,downLag:ld&&Number.isFinite(ld.lag)?Math.round(ld.lag):null,
+      downMode:ld?ld.mode:null});
+    if(dbgMissLog.length>30)dbgMissLog.shift();
+  }
   addJudge('MISS',1e9,kind,n.bs);}
 function fxPush(x,w,kind){if(fx.length>24)fx.shift();fx.push({x,w,kind,t0:performance.now()});}
 /* ===== 几何 ===== */
@@ -786,16 +804,17 @@ slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.f
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) 旧dx=${dbgTouch.dxOld} y=${dbgTouch.y} held=${dbgTouch.held} lag=${Number.isFinite(dbgTouch.lag)?dbgTouch.lag.toFixed(0):'-'}ms mode=${dbgTouch.mode} result=${dbgTouch.result}`:'(no touch yet)'}
 diag: start=${dbgStats.startEvt} cancel=${dbgStats.cancelEvt} maxTouch=${dbgStats.maxTouches} lag=${dbgStats.lagLast.toFixed(0)}/${dbgStats.lagMax.toFixed(0)}ms(5s max) realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
 fix: clamp=${dbgStats.clamp}(maxLag ${dbgStats.clampMax.toFixed(0)}ms) stalled=${dbgStats.stalled} ghost=${dbgStats.ghost} reorder=${dbgStats.reorder}
-journal: ${dbgJ.map(q=>`${q.kind}#${q.id} lag=${Number.isFinite(q.lag)?q.lag.toFixed(0):'-'}ms ${q.mode}${q.multi?'(multi)':''} t=${q.t.toFixed(0)} → ${q.result===null?'(pending)':q.result}${q.resolvedAt!==null?` +${(q.resolvedAt-q.arrive).toFixed(0)}ms`:''}`).join('\n')}
+journal: ${dbgJ.map(q=>`${q.kind}#${q.id} lag=${Number.isFinite(q.lag)?q.lag.toFixed(0):'-'}ms ${q.mode}${q.multi?'(multi)':''}${q.synth?`(synth via ${q.via})`:''} t=${q.t.toFixed(0)} → ${q.result===null?'(pending)':q.result}${q.resolvedAt!==null?` +${(q.resolvedAt-q.arrive).toFixed(0)}ms`:''}`).join('\n')}
 missByKind: ${JSON.stringify(dbgStats.missByKind)}
 downResult: ${JSON.stringify(dbgStats.downResult)}
-noneCause: ${JSON.stringify(dbgStats.noneCause)} avgTolOvershoot=${dbgStats.noneTolN?(dbgStats.noneTolSum/dbgStats.noneTolN).toFixed(1):'-'} revived=${dbgStats.revived}`;}
+noneCause: ${JSON.stringify(dbgStats.noneCause)} avgTolOvershoot=${dbgStats.noneTolN?(dbgStats.noneTolSum/dbgStats.noneTolN).toFixed(1):'-'} revived=${dbgStats.revived}
+missLog(直近${dbgMissLog.length}件, note MISS→直前downとの対応): ${dbgMissLog.length?dbgMissLog.slice(-6).map(m=>`${m.kind}@${m.bs} down=${m.downSeq===null?'無し':`#${m.downSeq} age=${m.downAgeMs}ms${m.downSynth?' synth':''} mode=${m.downMode} lag=${m.downLag}ms`}`).join('\n'):'(まだ無し)'}`;}
 /* ===== UI ===== */
 const $=id=>document.getElementById(id);
 const show=(id,on)=>$(id).classList.toggle('hide',!on);
 function resetRun(){J.combo=0;J.maxCombo=0;J.accSum=0;J.accN=0;
 J.counts={BEST:0,COOL:0,GOOD:0,MISS:0};J.miss.length=0;fx.length=0;lastJudge=null;
-logicMs=null;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();idLastT.clear();dbgInput=null;dbgEventCount=0;dbgTick=0;dbgJ.length=0;
+logicMs=null;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();idLastT.clear();dbgInput=null;dbgEventCount=0;dbgTick=0;dbgJ.length=0;lastDownEv=null;dbgMissLog.length=0;
 for(const n of chart.taps)n.state=0;
 for(const w of chart.wipes){w.state='pending';w.ptr=-1;w.entryErr=0;}
 for(const s of chart.slides){s.state='pending';s.ptr=-1;s.followX=0;s.noOwnerSince=0;s.nextTick=0;s.ticks=0;
