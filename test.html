@@ -63,6 +63,8 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <label><input type="checkbox" id="sDbg"> デバッグ</label></div>
 <div class="row"><label><input type="checkbox" id="sFlat"> 2Dモード(レーンの傾き無し / デバッグ用)</label></div>
 <div class="row"><label>入力時刻の扱い <select id="sInTime"><option value="auto" selected>自動補正(推奨)</option><option value="stamp">タイムスタンプ固定(v7以前の挙動)</option><option value="arrive">到着時刻のみ</option></select></label></div>
+<div class="row"><label>入力方式(要リロード) <select id="sInputMode"><option value="touch">Touch Events(既定)</option><option value="touch-passive">Touch Events / preventDefaultなし</option><option value="pointer">Pointer Events純粋構成(setPointerCaptureなし)</option></select></label></div>
+<div style="color:#889;font-size:11px">入力方式の変更はページ再読み込み後に反映されます(譜面/音楽は再選択が必要)</div>
 </details>
 <div class="row"><button id="btnPlay">PLAY</button></div>
 <div style="color:#889;font-size:11px">mc+音楽必須 / 背景任意 / D&D対応 / 判定C固定 / Space=pause<br>タイミングオフセットは譜面表示と判定を同時に動かします<br>
@@ -96,7 +98,10 @@ slide=頭をタッチ→時間に沿ったリボンを指で追従 / 中継点�
 const WIN={best:36,cool:76,good:110,miss:150}, ACCW={BEST:100,COOL:75,GOOD:40,MISS:0};
 const STEP=1000/60, TICK=100, AUTO=-999, INPUT_SLOP=2.5, SLIDE_TRAIL_MS=260;
 const SLIDE_TAIL_FREE_MS=200, SLIDE_BUF_SIZE=20, SLIDE_HANDOFF_GRACE_MS=120;
-const cfg={tOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false,flat:false,inTime:'auto'};
+const VALID_INPUT_MODES=['touch','touch-passive','pointer'];
+let savedInputMode='touch';
+try{const m=localStorage.getItem('inputMode');if(VALID_INPUT_MODES.includes(m))savedInputMode=m;}catch(_){}
+const cfg={tOff:0,speed:1,lead:1400,auto:false,eff:true,suck:true,startC:false,dbg:false,flat:false,inTime:'auto',inputMode:savedInputMode};
 /* ===== 譜面パース ===== */
 const beatF=b=>b[0]+b[1]/(b[2]||1), beatStr=b=>b[2]===1?`${b[0]}`:`${b[0]}+${b[1]}/${b[2]}`;
 function buildTiming(a){const evs=(a||[]).filter(t=>t.bpm!==undefined)
@@ -322,11 +327,21 @@ function pushEv(k,e,arrive,multi,meta){
   if(cfg.dbg){dbgJ.push(qe);if(dbgJ.length>10)dbgJ.shift();}}
 /* iOS SafariはPointer Events + setPointerCaptureの組み合わせで、既に1本指が
  * 押さえた状態のまま別の指でdownすると新しいpointerdownが発火しない(または
- * 判定に届かない)ことがある。タッチ対応環境では素のTouch Eventsを使い、
- * setPointerCaptureを経由しない経路にすることでこれを回避する。
- * マウスのみの環境(PC)は従来通りPointer Eventsを使う。 */
+ * 判定に届かない)ことがある。タッチ対応環境では従来、素のTouch Eventsを使い、
+ * setPointerCaptureを経由しない経路にすることでこれを回避していた。
+ * cfg.inputModeで下記3方式を切り替えられる(切り替えはページ再読み込みが必要):
+ *   'touch'         : Touch Events + {passive:false}+preventDefault (既定/従来の挙動)
+ *   'touch-passive' : Touch Eventsは同じ経路だがpreventDefaultを呼ばない
+ *                     (touch-action:noneのみでジェスチャー抑制できるかのA/B実験用。
+ *                      synthetic down/timestamp補正など他のロジックは一切変更しない)
+ *   'pointer'       : setPointerCaptureを使わない純粋なPointer Events構成。
+ *                     touches[]再走査・synthetic downの仕組みを使わず、pointerId単位で
+ *                     そのままpushEvに渡す(タイムスタンプのclamp/auto補正はそのまま適用)
+ * マウスのみの環境(PC)は従来通りsetPointerCapture付きのPointer Eventsを使う
+ * (このバグはiPadのマルチタッチ特有のため、PC側の挙動は変更しない)。 */
 const supportsTouch=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
-if(supportsTouch){
+const usePreventDefault=cfg.inputMode!=='touch-passive';
+if(supportsTouch&&cfg.inputMode!=='pointer'){
   const mk=(te,t)=>({pointerId:t.identifier,clientX:t.clientX,clientY:t.clientY,timeStamp:te.timeStamp});
   /* Safariがtouchstartを取りこぼすことがある(特に、既に別指が触れている状態で
    * もう1本を静止させたまま置いた場合)。changedTouchesだけでなく、その時点で
@@ -358,10 +373,44 @@ if(supportsTouch){
     if(type==='start'){const r=getCvRect();for(const t of te.changedTouches){tapRings.push({x:t.clientX-r.left,y:t.clientY-r.top,t0:now});}if(tapRings.length>16)tapRings.splice(0,tapRings.length-16);}
   };
   /* 到着時刻は各ハンドラの先頭で1回だけ取る。multi=「他の指が既に触れている状態でのstart/end」= スタンプが古くなり得る */
-  cv.addEventListener('touchstart',e=>{const a=performance.now();markReal(e,'start',a);const multi=e.touches.length>e.changedTouches.length;const meta={synth:false,via:'touchstart',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('down',mk(e,t),a,multi,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchmove',e=>{const a=performance.now();markReal(e,'move',a);const meta={synth:false,via:'touchmove',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('move',mk(e,t),a,false,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchend',e=>{const a=performance.now();markReal(e,'end',a);const multi=e.touches.length>0;const meta={synth:false,via:'touchend',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('up',mk(e,t),a,multi,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
-  cv.addEventListener('touchcancel',e=>{const a=performance.now();markReal(e,'cancel',a);const meta={synth:false,via:'touchcancel',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('up',mk(e,t),a,true,meta);syncTouches(e,a);e.preventDefault();},{passive:false});
+  cv.addEventListener('touchstart',e=>{const a=performance.now();markReal(e,'start',a);const multi=e.touches.length>e.changedTouches.length;const meta={synth:false,via:'touchstart',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('down',mk(e,t),a,multi,meta);syncTouches(e,a);if(usePreventDefault)e.preventDefault();},{passive:false});
+  cv.addEventListener('touchmove',e=>{const a=performance.now();markReal(e,'move',a);const meta={synth:false,via:'touchmove',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('move',mk(e,t),a,false,meta);syncTouches(e,a);if(usePreventDefault)e.preventDefault();},{passive:false});
+  cv.addEventListener('touchend',e=>{const a=performance.now();markReal(e,'end',a);const multi=e.touches.length>0;const meta={synth:false,via:'touchend',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('up',mk(e,t),a,multi,meta);syncTouches(e,a);if(usePreventDefault)e.preventDefault();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{const a=performance.now();markReal(e,'cancel',a);const meta={synth:false,via:'touchcancel',touches:e.touches.length,changedTouches:e.changedTouches.length};for(const t of e.changedTouches)pushEv('up',mk(e,t),a,true,meta);syncTouches(e,a);if(usePreventDefault)e.preventDefault();},{passive:false});
+}else if(supportsTouch&&cfg.inputMode==='pointer'){
+  /* 純粋なPointer Events構成。setPointerCaptureは使わない。touches[]の再走査や
+   * synthetic down/upの仕組みは使わず、pointerId単位でそのままpushEvに渡す
+   * (Pointer Events自体がタッチごとに確実にpointerdown/upを発火する前提の構成)。
+   * multi判定用に現在押さえている指の集合を自前で追跡する(Touch APIのtouches[]相当)。 */
+  const activePointers=new Set();
+  cv.addEventListener('pointerdown',e=>{
+    const a=performance.now();
+    const multi=activePointers.size>0;
+    activePointers.add(e.pointerId);
+    dbgStats.realEvt++;dbgStats.startEvt++;dbgStats.lastRealEventAt=a;
+    dbgStats.maxTouches=Math.max(dbgStats.maxTouches,activePointers.size);
+    const r=getCvRect();tapRings.push({x:e.clientX-r.left,y:e.clientY-r.top,t0:a});if(tapRings.length>16)tapRings.splice(0,tapRings.length-16);
+    const meta={synth:false,via:'pointerdown',touches:activePointers.size,changedTouches:1};
+    pushEv('down',e,a,multi,meta);
+    if(usePreventDefault)e.preventDefault();
+  },{passive:false});
+  cv.addEventListener('pointermove',e=>{
+    const a=performance.now();
+    dbgStats.realEvt++;dbgStats.lastRealEventAt=a;
+    const meta={synth:false,via:'pointermove',touches:activePointers.size,changedTouches:1};
+    pushEv('move',e,a,false,meta);
+    if(usePreventDefault)e.preventDefault();
+  },{passive:false});
+  const pointerEnd=(e,via)=>{
+    const a=performance.now();
+    const multi=activePointers.size>1;
+    activePointers.delete(e.pointerId);
+    dbgStats.realEvt++;dbgStats.lastRealEventAt=a;if(via==='pointercancel')dbgStats.cancelEvt++;
+    const meta={synth:false,via,touches:activePointers.size,changedTouches:1};
+    pushEv('up',e,a,multi,meta);
+  };
+  cv.addEventListener('pointerup',e=>{pointerEnd(e,'pointerup');if(usePreventDefault)e.preventDefault();},{passive:false});
+  cv.addEventListener('pointercancel',e=>{pointerEnd(e,'pointercancel');if(usePreventDefault)e.preventDefault();},{passive:false});
 }else{
   cv.addEventListener('pointerdown',e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){} pushEv('down',e);e.preventDefault();},{passive:false});
   cv.addEventListener('pointermove',e=>{pushEv('move',e);e.preventDefault();},{passive:false});
@@ -799,7 +848,7 @@ const inp=dbgInput;
 document.getElementById('dbg').textContent=
 `audio=${clock.audioMs().toFixed(1)} chart=${now.toFixed(1)} judge=${judgeNowFromChart(now).toFixed(1)} draw=${(now+cfg.tOff).toFixed(1)} logic=${(logicMs??0).toFixed(1)} fps=${fps} mode=${cfg.flat?'2D':'3D'} combo=${J.combo} ptr=${pointers.size} ev=${dbgEventCount} offset=${chart.chartOffset} clock=${clock.timingSource} perfToCtx=${clock.perfToCtxMs.toFixed(2)} speed=${cfg.speed}
 input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} x=${inp.x.toFixed(0)} y=${inp.y.toFixed(0)}`:'(no input yet)'}
-ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} lag=${Number.isFinite(dbgTs.lag)?dbgTs.lag.toFixed(0):'-'}ms mode=${dbgTs.mode} used=${(dbgTs.final-dbgTs.now).toFixed(1)}`:'(no event yet)'} in=${cfg.inTime} lagEma=${lagEma.toFixed(1)} dots=${rawTouches.size} inputMode=${supportsTouch?'touch':'pointer'}
+ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} lag=${Number.isFinite(dbgTs.lag)?dbgTs.lag.toFixed(0):'-'}ms mode=${dbgTs.mode} used=${(dbgTs.final-dbgTs.now).toFixed(1)}`:'(no event yet)'} in=${cfg.inTime} lagEma=${lagEma.toFixed(1)} dots=${rawTouches.size} inputMode=${cfg.inputMode}${usePreventDefault?'':'(no-pD)'}
 slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) 旧dx=${dbgTouch.dxOld} y=${dbgTouch.y} held=${dbgTouch.held} lag=${Number.isFinite(dbgTouch.lag)?dbgTouch.lag.toFixed(0):'-'}ms mode=${dbgTouch.mode} result=${dbgTouch.result}`:'(no touch yet)'}
 diag: start=${dbgStats.startEvt} cancel=${dbgStats.cancelEvt} maxTouch=${dbgStats.maxTouches} lag=${dbgStats.lagLast.toFixed(0)}/${dbgStats.lagMax.toFixed(0)}ms(5s max) realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
@@ -881,6 +930,13 @@ bind('sStartC','startC');bind('sDbg','dbg');bind('sFlat','flat');
 $('sFlat').addEventListener('input',()=>{$('pFlat').checked=cfg.flat;});
 $('sInTime').addEventListener('change',e=>{cfg.inTime=e.target.value;$('pInTime').value=cfg.inTime;});
 $('pInTime').addEventListener('change',e=>{cfg.inTime=e.target.value;$('sInTime').value=cfg.inTime;});
+$('sInputMode').value=cfg.inputMode;
+$('sInputMode').addEventListener('change',e=>{
+  const v=e.target.value;
+  try{localStorage.setItem('inputMode',v);}catch(_){}
+  if(confirm('入力方式の変更を反映するにはページの再読み込みが必要です(譜面/音楽は再選択が必要)。今すぐ再読み込みしますか?')){location.reload();}
+  else{$('sInputMode').value=cfg.inputMode;}
+});
 $('pFlat').addEventListener('input',e=>{cfg.flat=e.target.checked;$('sFlat').checked=cfg.flat;});
 function syncPauseControls(){
 $('pFlat').checked=cfg.flat;$('pInTime').value=cfg.inTime;
