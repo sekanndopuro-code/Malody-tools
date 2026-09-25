@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Malody Slide Test Player v16</title>
+<title>Malody Slide Test Player v17(dbg)</title>
 <style>
 html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
 -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;font-family:system-ui,sans-serif;color:#dde}
@@ -34,8 +34,10 @@ background:rgba(15,15,25,.72);color:#eef;cursor:pointer;backdrop-filter:blur(2px
 .pauseCtrl .pauseHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;color:#dde}
 .pauseCtrl output{font-family:ui-monospace,monospace;color:#9fe}
 .pauseCtrl input[type=range]{width:100%;accent-color:#9fe}
-#dbg{position:fixed;top:98px;left:8px;right:8px;z-index:30;font:11px/1.45 monospace;color:#7f7;
-background:rgba(0,0,0,.72);padding:6px 8px;border-radius:6px;white-space:pre;display:none;pointer-events:none;box-sizing:border-box;max-width:calc(100vw - 16px)}
+#dbg{position:fixed;top:98px;left:8px;right:8px;z-index:30;font:10px/1.5 monospace;color:#7f7;
+background:rgba(0,0,0,.78);padding:6px 8px;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;
+display:none;pointer-events:none;box-sizing:border-box;max-width:calc(100vw - 16px);
+max-height:calc(100vh - 106px);overflow:hidden}
 .miss{font:11px monospace;color:#f88}
 details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 </style>
@@ -45,7 +47,7 @@ details{margin:6px 0} summary{cursor:pointer;color:#9cf}
 <div id="dbg"></div>
 <div id="load" class="ov">
 <div class="panel">
-<h2>Malody Slide Test Player v16</h2>
+<h2>Malody Slide Test Player v17(dbg)</h2>
 <div class="row"><span class="fl">① 譜面ファイルを選択（.mc / .json）</span><input type="file" id="fMc"></div>
 <div class="row"><span class="fl">② 音楽ファイルを選択（.mp3 / .m4a / .ogg / .wav）</span><input type="file" id="fAu"></div>
 <div class="row"><span class="fl">③ 背景画像（任意: .jpg / .png）</span><input type="file" id="fBg"></div>
@@ -295,13 +297,21 @@ function pushEv(k,e,arrive,multi){
   if(arrive===undefined)arrive=performance.now();
   if(k==='down'||k==='move'){const q0=screenPoint(e);rawTouches.set(e.pointerId,{x:q0.sx,y:q0.sy});}
   else if(k==='up'){rawTouches.delete(e.pointerId);}
+  dbgEventCount++;
+  dbgInput={kind:k,perf:arrive,audio:clock.audioMs(),chart:clock.chartMs(),x:e.clientX,y:e.clientY};
   if(clock.state!=='playing')return;const q=screenPoint(e);
   const r=resolveEventPerf(e,arrive,!!multi);
   let t=clock.eventChartMs(r.t);
   /* 同じ指のイベントは時刻を絶対に逆転させない(逆転すると upがdownより先に処理されて「居座り指」になる) */
   const last=idLastT.get(e.pointerId);if(last!==undefined&&t<last){t=last;dbgStats.reorder++;}idLastT.set(e.pointerId,t);
-  queue.push({kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t,seq:++evSeq,lag:r.lag,mode:r.mode});
-  if(cfg.dbg){dbgJ.push(`${k}#${e.pointerId} lag=${Number.isFinite(r.lag)?r.lag.toFixed(0):'-'} ${r.mode}`);if(dbgJ.length>6)dbgJ.shift();}}
+  /* qeはキューに積む実体そのもの。dbgJにも同じ参照を積んでおくことで、後から
+   * processPointerInput側がqe.resultを埋めた時点でジャーナル表示にも反映される
+   * (=1個のイベントを「到着→タイムスタンプ補正→キュー投入→消費→判定結果」まで
+   * 単一IDで追跡できる)。文字列化はdrawDbg側で毎フレーム行う。 */
+  const qe={kind:k,id:e.pointerId,sx:q.sx,sy:q.sy,t,seq:++evSeq,arrive,rawTs:Number(e.timeStamp),
+    lag:r.lag,mode:r.mode,multi:!!multi,result:null,resolvedAt:null};
+  queue.push(qe);
+  if(cfg.dbg){dbgJ.push(qe);if(dbgJ.length>10)dbgJ.shift();}}
 /* iOS SafariはPointer Events + setPointerCaptureの組み合わせで、既に1本指が
  * 押さえた状態のまま別の指でdownすると新しいpointerdownが発火しない(または
  * 判定に届かない)ことがある。タッチ対応環境では素のTouch Eventsを使い、
@@ -446,7 +456,7 @@ function tryReviveTap(judgeMs,ev,x255){
   if(!best)return false;
   return reviveTapMiss(best,judgeMs-noteJudgeTime(best.t));
 }
-function tallyDown(r){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;return r;}
+function tallyDown(r,ev){dbgStats.downResult[r]=(dbgStats.downResult[r]||0)+1;if(ev){ev.result=r;ev.resolvedAt=performance.now();}return r;}
 /* 'none'になった原因を分類する診断:
  * resolvedHit:  そのタップは既に別の入力(別の指など)に「先取り」されて成功済みだった(=二重取り合い)
  * resolvedMiss: state=2(見切りMISS)のノーツがあったのに復活処理が拾えなかった(=復活ロジック側の見落とし)
@@ -489,17 +499,18 @@ function processPointerInput(ev){
     cands.sort((a,b)=>a.d-b.d||(a.kind==='tap'?0:a.kind==='head'?1:2)-(b.kind==='tap'?0:b.kind==='head'?1:2));
     const discrete=cands.filter(c=>c.kind==='tap'||c.kind==='head');const nearestDiscrete=discrete.length?Math.min(...discrete.map(c=>c.d)):Infinity;
     const chosen=cands[0];
-    if(wipe && (chosen===undefined || (chosen.kind!=='wipe' && (judgeMs-noteJudgeTime(wipe.t))<nearestDiscrete))){dbgTouch.result='wipe-clear';tallyDown(dbgTouch.result);clearWipe(wipe);return;}
+    if(wipe && (chosen===undefined || (chosen.kind!=='wipe' && (judgeMs-noteJudgeTime(wipe.t))<nearestDiscrete))){dbgTouch.result='wipe-clear';tallyDown(dbgTouch.result,ev);clearWipe(wipe);return;}
     if(chosen){
-      if(chosen.kind==='tap'){const ok=judgeHit(chosen.obj,judgeMs-noteJudgeTime(chosen.obj.t),'tap');dbgTouch.result=ok?'tap-hit':'tap-outofwindow';tallyDown(dbgTouch.result);if(ok)chosen.obj.state=1;return;}
-      if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);dbgTouch.result=tier?'head-hit':'head-outofwindow';tallyDown(dbgTouch.result);if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
+      if(chosen.kind==='tap'){const ok=judgeHit(chosen.obj,judgeMs-noteJudgeTime(chosen.obj.t),'tap');dbgTouch.result=ok?'tap-hit':'tap-outofwindow';tallyDown(dbgTouch.result,ev);if(ok)chosen.obj.state=1;return;}
+      if(chosen.kind==='head'){const tier=judgeSlideHead(chosen.obj,judgeMs);dbgTouch.result=tier?'head-hit':'head-outofwindow';tallyDown(dbgTouch.result,ev);if(tier){ensureSlideCP(chosen.obj);assignSlideOwner(chosen.obj,ev.id,judgeMs);}return;}
     }
-    dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id,true)?'slidebody':'none';tallyDown(dbgTouch.result);
+    dbgTouch.result=catchSlideBody(judgeMs,x255,ev.id,true)?'slidebody':'none';tallyDown(dbgTouch.result,ev);
     if(dbgTouch.result==='none'){
-      if(tryReviveTap(judgeMs,ev,x255)){dbgTouch.result='tap-revived';tallyDown(dbgTouch.result);}
+      if(tryReviveTap(judgeMs,ev,x255)){dbgTouch.result='tap-revived';tallyDown(dbgTouch.result,ev);}
       else diagnoseNone(judgeMs,ev,x255);
     }
   }else if(ev.kind==='move'){
+    ev.result='move';ev.resolvedAt=performance.now();
     if(p.ownerSlideId!==null){
       if(cfg.suck){
         const w=wipeCandidate(judgeMs,x255);
@@ -509,9 +520,10 @@ function processPointerInput(ev){
       if(S&&!S.finalized)S.followX=x255;
       return;
     }
-    catchSlideBody(judgeMs,x255,ev.id,false);
+    ev.result=catchSlideBody(judgeMs,x255,ev.id,false)?'slidebody-move':'move-none';
   }else if(ev.kind==='up'){
     const owner=p.ownerSlideId;if(owner!==null){const S=chart.slides[owner];if(S&&!S.finalized){if(S.ptr===ev.id)S.ptr=-1;S.noOwnerSince=judgeMs;S.state='active';}p.ownerSlideId=null;}
+    ev.result=owner!==null?'slide-release':'up';ev.resolvedAt=performance.now();
     pointers.delete(ev.id);
   }
 }
@@ -768,13 +780,13 @@ function drawDbg(now){const s=chart.slides.find(s=>s.state==='active');
 const inp=dbgInput;
 document.getElementById('dbg').textContent=
 `audio=${clock.audioMs().toFixed(1)} chart=${now.toFixed(1)} judge=${judgeNowFromChart(now).toFixed(1)} draw=${(now+cfg.tOff).toFixed(1)} logic=${(logicMs??0).toFixed(1)} fps=${fps} mode=${cfg.flat?'2D':'3D'} combo=${J.combo} ptr=${pointers.size} ev=${dbgEventCount} offset=${chart.chartOffset} clock=${clock.timingSource} perfToCtx=${clock.perfToCtxMs.toFixed(2)} speed=${cfg.speed}
-input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} dx=${inp.x.toFixed(0)} dy=${inp.y.toFixed(0)}`:'(no input yet)'}
+input: ${inp?`kind=${inp.kind} perf=${inp.perf.toFixed(1)} audio=${inp.audio.toFixed(1)} chart=${inp.chart.toFixed(1)} x=${inp.x.toFixed(0)} y=${inp.y.toFixed(0)}`:'(no input yet)'}
 ts: ${dbgTs?`raw=${dbgTs.raw} now=${dbgTs.now.toFixed(1)} branch=${dbgTs.branch} lag=${Number.isFinite(dbgTs.lag)?dbgTs.lag.toFixed(0):'-'}ms mode=${dbgTs.mode} used=${(dbgTs.final-dbgTs.now).toFixed(1)}`:'(no event yet)'} in=${cfg.inTime} lagEma=${lagEma.toFixed(1)} dots=${rawTouches.size} inputMode=${supportsTouch?'touch':'pointer'}
 slide: ${s?`tx=${slideXAtTime(s,judgeNowFromChart(now)).toFixed(1)} follow=${s.followX.toFixed(1)} tol=${slideTol(slideWAtTime(s,judgeNowFromChart(now))).toFixed(1)} avg=${s.avgErr.toFixed(1)} ok=${s.avgOk} ticks=${s.ticks} nextTick=${s.nextTick.toFixed(1)} cp=${s.cpIndex}/${s.cp.length}`:'-'}
 touch: ${dbgTouch?`sx=${dbgTouch.sx} nearestTap dt=${dbgTouch.dt}ms dx=${dbgTouch.dx} (miss-win=${WIN.miss}ms hit-halfW=${dbgTouch.w!==null?hitHalfW(dbgTouch.w).toFixed(1):'-'}) 旧dx=${dbgTouch.dxOld} y=${dbgTouch.y} held=${dbgTouch.held} lag=${Number.isFinite(dbgTouch.lag)?dbgTouch.lag.toFixed(0):'-'}ms mode=${dbgTouch.mode} result=${dbgTouch.result}`:'(no touch yet)'}
 diag: start=${dbgStats.startEvt} cancel=${dbgStats.cancelEvt} maxTouch=${dbgStats.maxTouches} lag=${dbgStats.lagLast.toFixed(0)}/${dbgStats.lagMax.toFixed(0)}ms(5s max) realEvt=${dbgStats.realEvt} synthDown=${dbgStats.synthDown} synthUp=${dbgStats.synthUp} missNoEvt=${dbgStats.missNoEvt} missWithEvt=${dbgStats.missWithEvt}
 fix: clamp=${dbgStats.clamp}(maxLag ${dbgStats.clampMax.toFixed(0)}ms) stalled=${dbgStats.stalled} ghost=${dbgStats.ghost} reorder=${dbgStats.reorder}
-journal: ${dbgJ.join(' | ')}
+journal: ${dbgJ.map(q=>`${q.kind}#${q.id} lag=${Number.isFinite(q.lag)?q.lag.toFixed(0):'-'}ms ${q.mode}${q.multi?'(multi)':''} t=${q.t.toFixed(0)} → ${q.result===null?'(pending)':q.result}${q.resolvedAt!==null?` +${(q.resolvedAt-q.arrive).toFixed(0)}ms`:''}`).join('\n')}
 missByKind: ${JSON.stringify(dbgStats.missByKind)}
 downResult: ${JSON.stringify(dbgStats.downResult)}
 noneCause: ${JSON.stringify(dbgStats.noneCause)} avgTolOvershoot=${dbgStats.noneTolN?(dbgStats.noneTolSum/dbgStats.noneTolN).toFixed(1):'-'} revived=${dbgStats.revived}`;}
@@ -783,7 +795,7 @@ const $=id=>document.getElementById(id);
 const show=(id,on)=>$(id).classList.toggle('hide',!on);
 function resetRun(){J.combo=0;J.maxCombo=0;J.accSum=0;J.accN=0;
 J.counts={BEST:0,COOL:0,GOOD:0,MISS:0};J.miss.length=0;fx.length=0;lastJudge=null;
-logicMs=null;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();idLastT.clear();dbgInput=null;dbgEventCount=0;dbgTick=0;
+logicMs=null;tapSweep=0;wipeSweep=0;queue=[];pointers.clear();idLastT.clear();dbgInput=null;dbgEventCount=0;dbgTick=0;dbgJ.length=0;
 for(const n of chart.taps)n.state=0;
 for(const w of chart.wipes){w.state='pending';w.ptr=-1;w.entryErr=0;}
 for(const s of chart.slides){s.state='pending';s.ptr=-1;s.followX=0;s.noOwnerSince=0;s.nextTick=0;s.ticks=0;
