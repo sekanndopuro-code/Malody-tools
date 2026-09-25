@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Raw Touch/Pointer Probe</title>
+<style>
+:root{color-scheme:dark;}
+html,body{margin:0;height:100%;background:#0a0a0c;overflow:hidden;touch-action:none;
+-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;
+font-family:system-ui,sans-serif;color:#dde;
+padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box;}
+#wrap{display:flex;flex-direction:column;height:100%;}
+#stats{flex:0 0 auto;padding:8px 10px;font:12px/1.6 monospace;background:#141418;border-bottom:1px solid #2a2a30;}
+#stats .row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 14px;}
+#stats b{color:#fff;}
+#stats .touch b{color:#5bf;}
+#stats .pointer b{color:#fb5;}
+#stats .diff{color:#f66;font-weight:bold;}
+#stats .diff.ok{color:#6f6;}
+#hint{font-size:11px;color:#889;margin-top:2px;}
+#play{position:relative;flex:1 1 auto;background:#111116;overflow:hidden;}
+.ring{position:absolute;width:70px;height:70px;border:3px solid;border-radius:50%;
+transform:translate(-50%,-50%) scale(.3);opacity:1;pointer-events:none;
+animation:ringPulse .38s ease-out forwards;}
+@keyframes ringPulse{to{transform:translate(-50%,-50%) scale(2.4);opacity:0;}}
+#center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+text-align:center;color:#445;font-size:14px;pointer-events:none;padding:20px;box-sizing:border-box;}
+#log{flex:0 0 auto;height:32vh;overflow-y:auto;background:#0d0d10;border-top:1px solid #2a2a30;
+font:10px/1.5 monospace;padding:4px 8px;box-sizing:border-box;}
+#log div{white-space:pre;}
+#btnReset{position:absolute;top:8px;right:8px;z-index:5;background:#222;color:#dde;border:1px solid #444;
+border-radius:6px;padding:6px 10px;font-size:12px;}
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="stats">
+<div class="row"><span class="touch">touchstart: <b id="tCount">0</b> / 最小gap <b id="tMin">-</b> / 疑わしい欠落 <b id="tMiss">0</b></span></div>
+<div class="row"><span class="pointer">pointerdown: <b id="pCount">0</b> / 最小gap <b id="pMin">-</b> / 疑わしい欠落 <b id="pMiss">0</b></span></div>
+<div class="row">件数差(touch-pointer): <span id="diff" class="diff">0</span></div>
+<div id="hint">canvas描画・音声・判定処理は一切なし。touchstart/pointerdownの発火タイミングだけを記録します。画面下半分を連打/トリルしてください。「疑わしい欠落」は直近の間隔の中央値の1.6倍以上gapが空いた回数の推定値です。</div>
+</div>
+<div id="play">
+<div id="center">ここを連打・トリルしてください<br>(青いリング=touchstart / 橙色のリング=pointerdown)</div>
+</div>
+<div id="log"></div>
+</div>
+<button id="btnReset">リセット</button>
+<script>
+"use strict";
+const playEl=document.getElementById('play');
+const logEl=document.getElementById('log');
+const els={
+  tCount:document.getElementById('tCount'), tMin:document.getElementById('tMin'), tMiss:document.getElementById('tMiss'),
+  pCount:document.getElementById('pCount'), pMin:document.getElementById('pMin'), pMiss:document.getElementById('pMiss'),
+  diff:document.getElementById('diff')
+};
+function mkState(){return {count:0,lastArrive:null,gaps:[],minGap:null,suspectedMissed:0};}
+const state={touch:mkState(),pointer:mkState()};
+
+function median(arr){
+  if(!arr.length)return null;
+  const s=arr.slice().sort((a,b)=>a-b);
+  const m=Math.floor(s.length/2);
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+}
+
+function flash(x,y,color){
+  const d=document.createElement('div');
+  d.className='ring';
+  d.style.left=x+'px';d.style.top=y+'px';d.style.borderColor=color;
+  playEl.appendChild(d);
+  d.addEventListener('animationend',()=>d.remove());
+}
+
+function logLine(text,warn){
+  const p=document.createElement('div');
+  p.textContent=text;
+  if(warn)p.style.color='#f66';
+  logEl.insertBefore(p,logEl.firstChild);
+  while(logEl.childNodes.length>60)logEl.removeChild(logEl.lastChild);
+}
+
+function render(){
+  els.tCount.textContent=state.touch.count;
+  els.tMin.textContent=state.touch.minGap!=null?state.touch.minGap.toFixed(0)+'ms':'-';
+  els.tMiss.textContent=state.touch.suspectedMissed;
+  els.pCount.textContent=state.pointer.count;
+  els.pMin.textContent=state.pointer.minGap!=null?state.pointer.minGap.toFixed(0)+'ms':'-';
+  els.pMiss.textContent=state.pointer.suspectedMissed;
+  const diff=state.touch.count-state.pointer.count;
+  els.diff.textContent=diff;
+  els.diff.className='diff'+(diff===0?' ok':'');
+}
+
+function onDown(kind,id,arrive,x,y,rawTs,color){
+  const st=state[kind];
+  st.count++;
+  let gapTxt='-';
+  let warn=false;
+  if(st.lastArrive!=null){
+    const gap=arrive-st.lastArrive;
+    const prevGaps=st.gaps.slice();
+    st.gaps.push(gap);
+    if(st.gaps.length>20)st.gaps.shift();
+    if(st.minGap==null||gap<st.minGap)st.minGap=gap;
+    gapTxt=gap.toFixed(0)+'ms';
+    const med=median(prevGaps);
+    if(med!=null&&med>0&&gap>med*1.6){
+      const missed=Math.max(1,Math.round(gap/med)-1);
+      st.suspectedMissed+=missed;
+      warn=true;
+      gapTxt+=` \u26a0\u75d1\u308f\u3057\u3044\u6b20\u843d+${missed}`;
+    }
+  }
+  st.lastArrive=arrive;
+  flash(x,y,color);
+  logLine(`${kind}#${id} down gap=${gapTxt} rawTs=${Number(rawTs).toFixed(1)}`,warn);
+  render();
+}
+
+function rect(){return playEl.getBoundingClientRect();}
+
+playEl.addEventListener('touchstart',e=>{
+  const a=performance.now();
+  const r=rect();
+  for(const t of e.changedTouches){
+    onDown('touch',t.identifier,a,t.clientX-r.left,t.clientY-r.top,e.timeStamp,'#5bf');
+  }
+},{passive:true});
+
+playEl.addEventListener('pointerdown',e=>{
+  const a=performance.now();
+  const r=rect();
+  onDown('pointer',e.pointerId,a,e.clientX-r.left,e.clientY-r.top,e.timeStamp,'#fb5');
+},{passive:true});
+
+playEl.addEventListener('contextmenu',e=>e.preventDefault());
+
+document.getElementById('btnReset').addEventListener('click',()=>{
+  state.touch=mkState();state.pointer=mkState();
+  logEl.innerHTML='';
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
